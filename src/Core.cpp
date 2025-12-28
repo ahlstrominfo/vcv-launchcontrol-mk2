@@ -163,8 +163,10 @@ struct Core : Module {
         // Routing state for single mode
         int alternateCounter = 0;       // Counter for alternate/2+2 modes
 
-        // Helper to check if in single mode
-        bool isSingleMode() const { return valueLengthA >= 9; }
+        // Helper to check if values are in single mode (all 16 knobs for one seq)
+        bool isValueSingleMode() const { return valueLengthA >= 9; }
+        // Helper to check if steps are in single mode (all 16 buttons for one seq)
+        bool isStepSingleMode() const { return stepLengthA >= 9; }
     };
     Sequencer sequencers[8];
 
@@ -294,13 +296,13 @@ struct Core : Module {
         for (int s = 0; s < 8; s++) {
             Sequencer& seq = sequencers[s];
 
-            if (seq.isSingleMode()) {
-                // Single mode: only use Clock A
+            if (seq.isStepSingleMode()) {
+                // Single step mode: only use Clock A
                 if (clockARose) {
                     processSequencerClockSingle(s);
                 }
             } else {
-                // Dual mode: Clock A for Seq A, Clock B for Seq B
+                // Dual step mode: Clock A for Seq A, Clock B for Seq B
                 if (clockARose) {
                     processSequencerClockDualA(s);
                 }
@@ -330,13 +332,13 @@ struct Core : Module {
 
             // Output A
             outputs[SEQ_TRIG_A_OUTPUT].setVoltage(trigOutA[outSeq - 1] ? 10.f : 0.f);
-            int knobIndexA = seq.isSingleMode() ? seq.currentValueIndexA : seq.currentValueIndexA;
+            int knobIndexA = seq.isValueSingleMode() ? seq.currentValueIndexA : seq.currentValueIndexA;
             float cvA = knobValues[outSeq][knobIndexA] / 127.f * 5.f;
             outputs[SEQ_CV_A_OUTPUT].setVoltage(cvA);
 
             // Output B
             outputs[SEQ_TRIG_B_OUTPUT].setVoltage(trigOutB[outSeq - 1] ? 10.f : 0.f);
-            int knobIndexB = seq.isSingleMode() ? seq.currentValueIndexA : (8 + seq.currentValueIndexB);
+            int knobIndexB = seq.isValueSingleMode() ? seq.currentValueIndexA : (8 + seq.currentValueIndexB);
             float cvB = knobValues[outSeq][knobIndexB] / 127.f * 5.f;
             outputs[SEQ_CV_B_OUTPUT].setVoltage(cvB);
         } else {
@@ -573,18 +575,23 @@ struct Core : Module {
 
         Sequencer& seq = sequencers[currentLayout - 1];
 
-        INFO("LED: valA=%d valB=%d mode=%s", seq.valueLengthA, seq.valueLengthB, seq.isSingleMode() ? "SINGLE" : "DUAL");
-
-        if (seq.isSingleMode()) {
+        // Steps and values can have independent single/dual modes
+        // Step buttons
+        if (seq.isStepSingleMode()) {
             for (int i = 0; i < 16; i++) {
                 updateStepLEDSingle(i, seq);
             }
-            updateValueKnobLEDsSingle(seq);
         } else {
             for (int i = 0; i < 8; i++) {
                 updateStepLEDDual(i, seq, true);
                 updateStepLEDDual(8 + i, seq, false);
             }
+        }
+
+        // Value knobs
+        if (seq.isValueSingleMode()) {
+            updateValueKnobLEDsSingle(seq);
+        } else {
             updateValueKnobLEDsDual(seq);
         }
 
@@ -891,7 +898,7 @@ struct Core : Module {
         // Update LED - in sequencer mode, value knobs show sequencer state with soft takeover
         if (currentLayout > 0 && knobIndex < 16) {
             Sequencer& seq = sequencers[currentLayout - 1];
-            if (seq.isSingleMode()) {
+            if (seq.isValueSingleMode()) {
                 updateValueKnobLEDsSingle(seq);
             } else {
                 updateValueKnobLEDsDual(seq);
@@ -912,7 +919,7 @@ struct Core : Module {
                     seq.currentValueIndexA = 0;
                 }
                 lengthChangeTime[0] = currentTime;  // Record time for amber display
-                INFO("SET: valLenA=%d mode=%s", seq.valueLengthA, seq.isSingleMode() ? "SINGLE" : "DUAL");
+                INFO("SET: valLenA=%d valMode=%s", seq.valueLengthA, seq.isValueSingleMode() ? "SINGLE" : "DUAL");
                 updateSequencerLEDs();
                 break;
 
@@ -922,7 +929,7 @@ struct Core : Module {
                     seq.currentValueIndexB = 0;
                 }
                 lengthChangeTime[1] = currentTime;  // Record time for amber display
-                INFO("SET: valLenB=%d mode=%s", seq.valueLengthB, seq.isSingleMode() ? "SINGLE" : "DUAL");
+                INFO("SET: valLenB=%d valMode=%s", seq.valueLengthB, seq.isValueSingleMode() ? "SINGLE" : "DUAL");
                 updateSequencerLEDs();
                 break;
 
@@ -993,11 +1000,12 @@ struct Core : Module {
         }
 
         // If Record Arm is held in sequencer mode, select routing/competition mode
+        // Based on step mode (single=routing, dual=competition)
         if (recArmHeld && currentLayout > 0) {
             for (int i = 0; i < 8; i++) {
                 if (note == LCXL::TRACK_FOCUS[i]) {
                     Sequencer& seq = sequencers[currentLayout - 1];
-                    if (seq.isSingleMode()) {
+                    if (seq.isStepSingleMode()) {
                         seq.routingMode = i;
                         INFO("LaunchControl: Seq %d routing mode = %d", currentLayout, i);
                     } else {
@@ -1054,8 +1062,8 @@ struct Core : Module {
         if (currentLayout <= 0) return;
         Sequencer& seq = sequencers[currentLayout - 1];
 
-        // Show current mode on Track Focus buttons
-        int currentMode = seq.isSingleMode() ? seq.routingMode : seq.competitionMode;
+        // Show current mode on Track Focus buttons (based on step mode)
+        int currentMode = seq.isStepSingleMode() ? seq.routingMode : seq.competitionMode;
         for (int i = 0; i < 8; i++) {
             uint8_t color = (i == currentMode) ? LCXL::LED_GREEN_FULL : LCXL::LED_OFF;
             sendButtonLEDSysEx(i, color);
@@ -1184,7 +1192,7 @@ struct Core : Module {
         INFO("LaunchControl: Toggled step %d", stepIndex);
 
         // Update LED for this step
-        if (seq.isSingleMode()) {
+        if (seq.isStepSingleMode()) {
             updateStepLEDSingle(stepIndex, seq);
         } else {
             bool isSeqA = stepIndex < 8;
