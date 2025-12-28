@@ -79,6 +79,10 @@ struct Core : Module {
     int currentLayout = 0;  // 0 = default, 1-8 = sequencers
     bool deviceButtonHeld = false;
 
+    // Loop point selection state (for sequencer mode)
+    int heldStepIndex = -1;           // Which step is currently held (-1 = none)
+    bool loopPointSet = false;        // Was a loop point set while holding?
+
     // Fader values (0-127 MIDI, converted to 0-10V)
     int faderValues[8] = {0};
 
@@ -200,7 +204,7 @@ struct Core : Module {
         int channel = msg.getChannel();
         int status = msg.getStatus();
 
-        INFO("LaunchControl MIDI IN: status=%x channel=%d note=%d value=%d", status, channel, msg.getNote(), msg.getValue());
+        // Uncomment for debugging: INFO("LaunchControl MIDI IN: status=%x channel=%d note=%d value=%d", status, channel, msg.getNote(), msg.getValue());
 
         // Only process messages on our expected channel
         if (channel != LCXL::MIDI_CHANNEL) {
@@ -275,6 +279,8 @@ struct Core : Module {
     }
 
     void processNoteOn(int note, int velocity) {
+        INFO("LaunchControl: Note ON - note=%d velocity=%d", note, velocity);
+
         if (velocity == 0) {
             processNoteOff(note);
             return;
@@ -282,14 +288,17 @@ struct Core : Module {
 
         // Check for Device button
         if (note == LCXL::BTN_DEVICE) {
+            INFO("LaunchControl: Device button HELD");
             deviceButtonHeld = true;
             return;
         }
 
         // If Device is held, check for layout switching
         if (deviceButtonHeld) {
+            INFO("LaunchControl: Device held, checking for layout switch...");
             // Track Focus 1 = return to default
             if (note == LCXL::TRACK_FOCUS[0]) {
+                INFO("LaunchControl: Switching to default layout");
                 switchLayout(0);
                 return;
             }
@@ -297,6 +306,7 @@ struct Core : Module {
             // Track Control 1-8 = enter sequencer 1-8
             for (int i = 0; i < 8; i++) {
                 if (note == LCXL::TRACK_CONTROL[i]) {
+                    INFO("LaunchControl: Switching to sequencer %d", i + 1);
                     switchLayout(i + 1);
                     return;
                 }
@@ -316,6 +326,12 @@ struct Core : Module {
     void processNoteOff(int note) {
         if (note == LCXL::BTN_DEVICE) {
             deviceButtonHeld = false;
+            return;
+        }
+
+        // Handle step button release in sequencer mode
+        if (currentLayout > 0) {
+            processSequencerModeButtonRelease(note);
         }
     }
 
@@ -339,32 +355,72 @@ struct Core : Module {
         }
     }
 
+    // Helper to get step index from MIDI note (-1 if not a step button)
+    int getStepIndexFromNote(int note) {
+        for (int i = 0; i < 8; i++) {
+            if (note == LCXL::TRACK_FOCUS[i]) return i;
+            if (note == LCXL::TRACK_CONTROL[i]) return 8 + i;
+        }
+        return -1;
+    }
+
     void processSequencerModeButton(int note) {
+        int stepIndex = getStepIndexFromNote(note);
+        if (stepIndex < 0) return;
+
         int seqIndex = currentLayout - 1;
         Sequencer& seq = sequencers[seqIndex];
 
-        // Track Focus buttons = steps 1-8
-        for (int i = 0; i < 8; i++) {
-            if (note == LCXL::TRACK_FOCUS[i]) {
-                seq.steps[i] = !seq.steps[i];
-                updateStepLED(i, seq);
-                return;
-            }
-        }
+        if (heldStepIndex < 0) {
+            // No step currently held - this becomes the held step
+            heldStepIndex = stepIndex;
+            loopPointSet = false;
+            INFO("LaunchControl: Holding step %d for loop selection", stepIndex);
+        } else {
+            // Another step is held - set loop points!
+            int startStep = std::min(heldStepIndex, stepIndex);
+            int endStep = std::max(heldStepIndex, stepIndex);
 
-        // Track Control buttons = steps 9-16
-        for (int i = 0; i < 8; i++) {
-            if (note == LCXL::TRACK_CONTROL[i]) {
-                seq.steps[8 + i] = !seq.steps[8 + i];
-                updateStepLED(8 + i, seq);
-                return;
+            seq.loopStart = startStep;
+            seq.loopEnd = endStep;
+            loopPointSet = true;
+
+            INFO("LaunchControl: Set loop points: %d to %d", startStep, endStep);
+
+            // Update LEDs to show new loop points
+            for (int i = 0; i < 16; i++) {
+                updateStepLED(i, seq);
             }
         }
     }
 
-    void switchLayout(int newLayout) {
-        if (newLayout == currentLayout) return;
+    void processSequencerModeButtonRelease(int note) {
+        int stepIndex = getStepIndexFromNote(note);
+        if (stepIndex < 0) return;
 
+        // Only process if this is the held step being released
+        if (stepIndex == heldStepIndex) {
+            if (!loopPointSet) {
+                // No loop point was set - toggle the step
+                int seqIndex = currentLayout - 1;
+                Sequencer& seq = sequencers[seqIndex];
+                seq.steps[stepIndex] = !seq.steps[stepIndex];
+                updateStepLED(stepIndex, seq);
+                INFO("LaunchControl: Toggled step %d", stepIndex);
+            }
+            // Reset held state
+            heldStepIndex = -1;
+            loopPointSet = false;
+        }
+    }
+
+    void switchLayout(int newLayout) {
+        if (newLayout == currentLayout) {
+            INFO("LaunchControl: Already in layout %d, ignoring", newLayout);
+            return;
+        }
+
+        INFO("LaunchControl: Switching from layout %d to %d", currentLayout, newLayout);
         currentLayout = newLayout;
 
         // Reset pickup state for all knobs
@@ -374,6 +430,7 @@ struct Core : Module {
 
         // Update all LEDs for new layout
         updateAllLEDs();
+        INFO("LaunchControl: Layout switch complete, LEDs updated");
     }
 
     void updateKnobLED(int knobIndex) {
