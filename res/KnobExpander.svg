@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="35.56mm" height="128.5mm" viewBox="0 0 35.56 128.5">
+  <!-- Panel background -->
+  <rect width="35.56" height="128.5" fill="#1a1a1a"/>
+
+  <!-- Top accent stripe -->
+  <rect x="0" y="0" width="35.56" height="3" fill="#3498db"/>
+
+  <!-- Panel border -->
+  <rect x="0.3" y="0.3" width="34.96" height="127.9" fill="none" stroke="#333333" stroke-width="0.6"/>
+
+  <!-- Title area -->
+  <text x="17.78" y="8" text-anchor="middle" font-family="sans-serif" font-size="2.5" fill="#3498db">KNOBS</text>
+
+  <!-- Column labels -->
+  <text x="7.5" y="16" text-anchor="middle" font-family="sans-serif" font-size="1.8" fill="#666666">1</text>
+  <text x="17.5" y="16" text-anchor="middle" font-family="sans-serif" font-size="1.8" fill="#666666">2</text>
+  <text x="27.5" y="16" text-anchor="middle" font-family="sans-serif" font-size="1.8" fill="#666666">3</text>
+
+  <!-- Output decorative rings - Row 1 -->
+  <circle cx="7.5" cy="20" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="7.5" cy="30" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="7.5" cy="40" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="7.5" cy="50" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="7.5" cy="60" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="7.5" cy="70" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="7.5" cy="80" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="7.5" cy="90" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+
+  <!-- Output decorative rings - Row 2 -->
+  <circle cx="17.5" cy="20" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="17.5" cy="30" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="17.5" cy="40" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="17.5" cy="50" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="17.5" cy="60" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="17.5" cy="70" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="17.5" cy="80" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="17.5" cy="90" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+
+  <!-- Output decorative rings - Row 3 -->
+  <circle cx="27.5" cy="20" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="27.5" cy="30" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="27.5" cy="40" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="27.5" cy="50" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="27.5" cy="60" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="27.5" cy="70" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="27.5" cy="80" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="27.5" cy="90" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
+
+  <!-- Row numbers -->
+  <text x="2" y="21" font-family="sans-serif" font-size="1.5" fill="#555555">1</text>
+  <text x="2" y="31" font-family="sans-serif" font-size="1.5" fill="#555555">2</text>
+  <text x="2" y="41" font-family="sans-serif" font-size="1.5" fill="#555555">3</text>
+  <text x="2" y="51" font-family="sans-serif" font-size="1.5" fill="#555555">4</text>
+  <text x="2" y="61" font-family="sans-serif" font-size="1.5" fill="#555555">5</text>
+  <text x="2" y="71" font-family="sans-serif" font-size="1.5" fill="#555555">6</text>
+  <text x="2" y="81" font-family="sans-serif" font-size="1.5" fill="#555555">7</text>
+  <text x="2" y="91" font-family="sans-serif" font-size="1.5" fill="#555555">8</text>
+
+  <!-- Bottom accent -->
+  <rect x="5" y="118" width="25.56" height="0.5" fill="#444444"/>
+</svg>

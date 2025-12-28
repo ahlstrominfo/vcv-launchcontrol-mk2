@@ -4,6 +4,9 @@ RACK_DIR ?= $(shell pwd)/Rack-SDK
 # Source files
 SOURCES += src/plugin.cpp
 SOURCES += src/Core.cpp
+SOURCES += src/KnobExpander.cpp
+SOURCES += src/GateExpander.cpp
+SOURCES += src/SeqExpander.cpp
 
 # Add resources to distribution
 DISTRIBUTABLES += res

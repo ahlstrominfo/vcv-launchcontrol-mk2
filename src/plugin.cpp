@@ -7,4 +7,7 @@ void init(Plugin* p) {
 
     // Add modules here
     p->addModel(modelCore);
+    p->addModel(modelKnobExpander);
+    p->addModel(modelGateExpander);
+    p->addModel(modelSeqExpander);
 }

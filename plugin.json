@@ -18,6 +18,24 @@
       "name": "LaunchControl Core",
       "description": "Main controller for Novation Launch Control XL MK2",
       "tags": ["Controller", "MIDI", "Hardware clone"]
+    },
+    {
+      "slug": "KnobExpander",
+      "name": "Knob Expander",
+      "description": "Outputs all 24 knob CV values from Core module",
+      "tags": ["Expander", "Controller"]
+    },
+    {
+      "slug": "GateExpander",
+      "name": "Gate Expander",
+      "description": "Outputs all 16 button gate states from Core module",
+      "tags": ["Expander", "Controller"]
+    },
+    {
+      "slug": "SeqExpander",
+      "name": "Sequencer Expander",
+      "description": "Outputs triggers and CV from all 8 sequencers",
+      "tags": ["Expander", "Sequencer"]
     }
   ]
 }

@@ -317,3 +317,195 @@ Knob at 90:   [RED]    ←---- turn left
 - Use SysEx for direct LED control (bypasses template restrictions)
 - Send reset command on module init to take over LEDs
 - Batch LED updates using double-buffering for smooth transitions
+
+---
+
+## REDESIGN: Dual-Row Sequencer with Competition System (Dec 2025)
+
+### Overview
+
+Each sequencer layout can operate in **two modes** based on Value Length A:
+
+1. **Single Sequencer Mode** (Value Length A = 9-16): One sequencer, two outputs with routing
+2. **Dual Sequencer Mode** (Value Length A = 1-8): Two sequencers that can compete/interact
+
+### Parameter Knobs (Bottom Row)
+
+```
+Row 3: [VAL-A] [VAL-B] [STEP-A] [STEP-B] [PROB-A] [PROB-B] [BIAS] [reserved]
+          1       2       3        4        5        6       7        8
+```
+
+| Knob | Function | Range |
+|------|----------|-------|
+| 1 | **Value Length A** - How many value knobs for Seq A | 1-16 (≥9 = single mode) |
+| 2 | **Value Length B** - How many value knobs for Seq B | 0-8 (0=disabled) |
+| 3 | **Step Length A** - How many step buttons for Seq A | 1-16 |
+| 4 | **Step Length B** - How many step buttons for Seq B | 0-8 (0=disabled) |
+| 5 | **Probability A** - Chance Seq A fires (dual) / overall prob (single) | 0-100% |
+| 6 | **Probability B** - Chance Seq B fires (dual) / CV split (single) | 0-100% |
+| 7 | **Bias/Amount** - Competition bias (dual) / routing bias (single) | 0-100% |
+| 8 | Reserved for future | - |
+
+### Mode Determination
+
+```
+If Value Length A >= 9:
+  → SINGLE MODE
+  → All 16 buttons for steps (length set by knob 3)
+  → All 16 value knobs (length set by knob 1)
+  → Two outputs with ROUTING modes (Bernoulli gate style)
+  → Knobs 2 and 4 ignored
+  → Only Clock A used
+
+If Value Length A < 9:
+  → DUAL MODE
+  → Top 8 buttons (Track Focus) = Seq A steps (length set by knob 3, max 8)
+  → Bottom 8 buttons (Track Control) = Seq B steps (length set by knob 4, 0=disabled)
+  → Row 1 knobs = Seq A values (length set by knob 1)
+  → Row 2 knobs = Seq B values (length set by knob 2, 0=disabled)
+  → Two sequencers with COMPETITION modes
+  → Clock A normals to Clock B
+```
+
+---
+
+### Competition Modes (Dual Mode)
+
+**Selection:** Hold Record Arm + Press Track Focus 1-8
+
+| Rec Arm + Focus | Mode | Behavior | Knob 7 |
+|-----------------|------|----------|--------|
+| 1 | **Independent** | No competition, A and B fire freely | (no effect) |
+| 2 | **Steal** | Bernoulli decides winner when both want to fire | Who wins (0%=A, 100%=B) |
+| 3 | **A Priority** | A always wins ties, B only fires alone | How absolute |
+| 4 | **B Priority** | B always wins ties, A only fires alone | How absolute |
+| 5 | **Momentum** | Each win boosts winner's next chance | Boost amount |
+| 6 | **Revenge** | Loser gets probability boost next time | Boost amount |
+| 7 | **Echo** | Loser fires on NEXT clock as echo | Echo probability |
+| 8 | **Value Theft** | Winner uses combined CV value | Mix (0%=winner, 100%=sum) |
+
+**Trigger Stealing mechanic:**
+- When both A and B want to fire on same clock
+- Competition mode determines who "wins"
+- **Winner:** Fires trigger, advances value index
+- **Loser:** Step advances, but NO trigger, NO value change
+
+---
+
+### Routing Modes (Single Mode)
+
+**Selection:** Hold Record Arm + Press Track Focus 1-8
+
+| Rec Arm + Focus | Mode | Behavior | Knob 7 |
+|-----------------|------|----------|--------|
+| 1 | **All to A** | All triggers → Output A | (no effect) |
+| 2 | **All to B** | All triggers → Output B | (no effect) |
+| 3 | **Bernoulli** | Random split per trigger | Split % (0%=A, 100%=B) |
+| 4 | **Alternate** | A, B, A, B, A, B... | Phase offset |
+| 5 | **2+2** | AA, BB, AA, BB... | Pattern length |
+| 6 | **Burst** | Random bursts to each output | Burst probability |
+| 7 | **Probability** | Knob-controlled split | Split % |
+| 8 | **Pattern** | Odd steps=A, even steps=B | (no effect) |
+
+**Single Mode knob meanings:**
+- Knob 5: Overall probability (chance step fires at all)
+- Knob 6: CV split (0%=both same, 100%=A gets row1, B gets row2)
+- Knob 7: Routing bias (mode-dependent)
+
+---
+
+### Trigger/Value Advancement
+
+**Clock pulse behavior:**
+1. Clock advances step position: `step = (step + 1) % STEP_LENGTH`
+2. If current step is ACTIVE (button ON):
+   - Apply probability check (knob 5/6)
+   - Apply competition/routing mode
+   - Winners: Fire trigger, advance value index
+   - Losers: No trigger, no value advance
+3. If current step is INACTIVE (button OFF):
+   - No trigger
+   - Value index stays the same
+
+**Polyrhythm Example:**
+- Step Length = 4, Value Length = 5
+- Steps 0, 2 active (buttons on)
+```
+Clock:  0    1    2    3    0    1    2    3    0    1    2    3 ...
+Step:   0    1    2    3    0    1    2    3    0    1    2    3
+Trig:   ●         ●         ●         ●         ●         ●
+Value:  V0        V1        V2        V3        V4        V0
+```
+Pattern repeats after LCM(4 steps, 5 values) = 20 clock pulses with 10 triggers
+
+---
+
+### Button Mapping
+
+#### While Holding Device Button
+| Combo | Action |
+|-------|--------|
+| Device + Track Focus 1 | Return to default layout |
+| Device + Track Focus 2 | Copy current sequencer |
+| Device + Track Focus 3 | Paste to current sequencer |
+| Device + Track Focus 4 | Clear all steps |
+| Device + Track Focus 5 | Randomize steps |
+| Device + Track Focus 6 | Randomize values |
+| Device + Track Focus 7 | Invert steps (flip on↔off) |
+| Device + Track Focus 8 | Reset playheads to 0 |
+| Device + Track Control 1-8 | Enter Sequencer 1-8 |
+
+#### While Holding Record Arm Button
+| Combo | Action |
+|-------|--------|
+| Rec Arm + Track Focus 1-8 | Select routing/competition mode |
+
+#### Side Buttons (in sequencer mode)
+| Button | Function |
+|--------|----------|
+| Record Arm | Modifier (hold to select mode) |
+| Mute | (reserved for future) |
+| Solo | (reserved for future) |
+
+---
+
+### Inputs/Outputs
+
+**Core Module Inputs:**
+- Clock A (normaled to Clock B)
+- Clock B (for sequencer B in dual mode)
+- Reset (resets both A and B to step 0)
+
+**Core Module Outputs:**
+- Trigger A
+- CV A
+- Trigger B
+- CV B
+
+---
+
+### LED Feedback
+
+**Dual Mode:**
+- Top 8 buttons: Seq A steps (green=active, red=playhead, off=inactive)
+- Bottom 8 buttons: Seq B steps (green=active, red=playhead, off=inactive)
+- Row 1 knobs: Seq A values (dim=in range, bright=current, off=out of range)
+- Row 2 knobs: Seq B values (dim=in range, bright=current, off=out of range)
+- Bottom row knobs: Soft takeover (yellow/red/green)
+
+**Single Mode:**
+- All 16 buttons: Step pattern (green=active, red=playhead)
+- Row 1+2 knobs: Value range (dim=in range, bright=current)
+- Bottom row knobs: Soft takeover
+
+**While Holding Record Arm:**
+- Track Focus 1-8: Show current mode selection (lit = selected)
+
+---
+
+### Removed Features
+- Hold-to-select loop points (replaced by length knobs)
+- START knob for value range (always starts at 0)
+- Scale quantization
+- Slew, Range, Octave, Direction (replaced by competition system)

@@ -1,4 +1,5 @@
 #include "plugin.hpp"
+#include "ExpanderMessage.hpp"
 #include <midi.hpp>
 
 // Launch Control XL Factory Template 1 MIDI mappings (Channel 9)
@@ -50,6 +51,9 @@ struct Core : Module {
         PARAMS_LEN
     };
     enum InputId {
+        CLOCK_A_INPUT,
+        CLOCK_B_INPUT,
+        RESET_INPUT,
         INPUTS_LEN
     };
     enum OutputId {
@@ -61,6 +65,10 @@ struct Core : Module {
         FADER_OUTPUT_6,
         FADER_OUTPUT_7,
         FADER_OUTPUT_8,
+        SEQ_TRIG_A_OUTPUT,
+        SEQ_CV_A_OUTPUT,
+        SEQ_TRIG_B_OUTPUT,
+        SEQ_CV_B_OUTPUT,
         OUTPUTS_LEN
     };
     enum LightId {
@@ -69,19 +77,47 @@ struct Core : Module {
         LIGHTS_LEN
     };
 
+    // Competition modes (dual mode)
+    enum CompetitionMode {
+        COMP_INDEPENDENT = 0,
+        COMP_STEAL,
+        COMP_A_PRIORITY,
+        COMP_B_PRIORITY,
+        COMP_MOMENTUM,
+        COMP_REVENGE,
+        COMP_ECHO,
+        COMP_VALUE_THEFT
+    };
+
+    // Routing modes (single mode)
+    enum RoutingMode {
+        ROUTE_ALL_A = 0,
+        ROUTE_ALL_B,
+        ROUTE_BERNOULLI,
+        ROUTE_ALTERNATE,
+        ROUTE_TWO_TWO,
+        ROUTE_BURST,
+        ROUTE_PROBABILITY,
+        ROUTE_PATTERN
+    };
+
     bool takenOver = false;
     dsp::BooleanTrigger takeoverTrigger;
+    dsp::SchmittTrigger clockTriggerA;
+    dsp::SchmittTrigger clockTriggerB;
+    dsp::SchmittTrigger resetTrigger;
+    dsp::PulseGenerator trigPulseA[8];   // Trigger A pulse for each sequencer
+    dsp::PulseGenerator trigPulseB[8];   // Trigger B pulse for each sequencer
 
     midi::InputQueue midiInput;
     midi::Output midiOutput;
 
     // Current state
     int currentLayout = 0;  // 0 = default, 1-8 = sequencers
+    int outputLayout = 0;   // Which layout's sequencer to output (0 = follow currentLayout)
     bool deviceButtonHeld = false;
-
-    // Loop point selection state (for sequencer mode)
-    int heldStepIndex = -1;           // Which step is currently held (-1 = none)
-    bool loopPointSet = false;        // Was a loop point set while holding?
+    bool recArmHeld = false;          // For mode selection (hold + track focus)
+    int lastMidiOutputDeviceId = -1;  // Track MIDI output connection for auto-init
 
     // Fader values (0-127 MIDI, converted to 0-10V)
     int faderValues[8] = {0};
@@ -94,13 +130,41 @@ struct Core : Module {
 
     // Sequencer states (8 sequencers)
     struct Sequencer {
-        bool steps[16] = {false};       // Step on/off
-        int loopStart = 0;              // Loop start step (0-15)
-        int loopEnd = 15;               // Loop end step (0-15)
-        int currentStep = 0;            // Current playback position
-        int currentValueIndex = 0;      // Current value knob index
-        int valueStart = 0;             // Start value knob (0-15)
-        int valueEnd = 15;              // End value knob (0-15)
+        bool steps[16] = {false};       // Step on/off (all 16 buttons)
+
+        // Length parameters (from knobs 1-4)
+        int valueLengthA = 8;           // Value length for Seq A (1-16, >=9 = single mode)
+        int valueLengthB = 4;           // Value length for Seq B (0-8, 0=disabled)
+        int stepLengthA = 8;            // Step length for Seq A (1-16)
+        int stepLengthB = 4;            // Step length for Seq B (0-8, 0=disabled)
+
+        // Probability and bias (from knobs 5-7)
+        float probA = 1.0f;             // Probability A fires (0-1)
+        float probB = 1.0f;             // Probability B fires (0-1)
+        float bias = 0.5f;              // Competition/routing bias (0-1)
+
+        // Mode selection
+        int competitionMode = COMP_INDEPENDENT;  // For dual mode
+        int routingMode = ROUTE_ALL_A;           // For single mode
+
+        // Playback state
+        int currentStepA = 0;           // Current step position for Seq A
+        int currentStepB = 0;           // Current step position for Seq B
+        int currentValueIndexA = 0;     // Current value index for Seq A
+        int currentValueIndexB = 0;     // Current value index for Seq B
+
+        // Momentum/revenge state for competition modes
+        float momentumA = 0.5f;         // Current win chance for A
+        float momentumB = 0.5f;         // Current win chance for B
+        bool lastWinnerA = true;        // Who won last (for revenge mode)
+        bool pendingEchoB = false;      // Echo pending for B
+        bool pendingEchoA = false;      // Echo pending for A
+
+        // Routing state for single mode
+        int alternateCounter = 0;       // Counter for alternate/2+2 modes
+
+        // Helper to check if in single mode
+        bool isSingleMode() const { return valueLengthA >= 9; }
     };
     Sequencer sequencers[8];
 
@@ -108,16 +172,36 @@ struct Core : Module {
     int lastPhysicalKnobPos[24] = {};  // Will be initialized to -1 in constructor
     bool knobPickedUp[24] = {};        // Will be initialized to true in constructor
 
+    // Amber display timer for length parameters (0=valLenA, 1=valLenB, 2=stepLenA, 3=stepLenB)
+    float lengthChangeTime[4] = {-1.f, -1.f, -1.f, -1.f};
+    static constexpr float AMBER_DISPLAY_TIME = 0.2f;  // 200ms
+    float currentTime = 0.f;  // Accumulated time for amber timeout
+
+    // Expander message for right-side expanders
+    LCXLExpanderMessage expanderMessage;
+    bool seqTriggeredThisFrame[8] = {false};  // Track which sequencers triggered
+
     Core() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
 
         // Configure takeover button
         configButton(TAKEOVER_PARAM, "Take Over LEDs");
 
+        // Configure inputs
+        configInput(CLOCK_A_INPUT, "Clock A");
+        configInput(CLOCK_B_INPUT, "Clock B (normaled to A)");
+        configInput(RESET_INPUT, "Reset");
+
         // Configure fader outputs
         for (int i = 0; i < 8; i++) {
             configOutput(FADER_OUTPUT_1 + i, string::f("Fader %d", i + 1));
         }
+
+        // Configure sequencer outputs
+        configOutput(SEQ_TRIG_A_OUTPUT, "Trigger A");
+        configOutput(SEQ_CV_A_OUTPUT, "CV A");
+        configOutput(SEQ_TRIG_B_OUTPUT, "Trigger B");
+        configOutput(SEQ_CV_B_OUTPUT, "CV B");
 
         // Initialize soft takeover state
         for (int i = 0; i < 24; i++) {
@@ -134,6 +218,35 @@ struct Core : Module {
     }
 
     void process(const ProcessArgs& args) override {
+        // Track time for amber display timeout
+        currentTime += args.sampleTime;
+
+        // Check if any amber timer just expired and needs LED update
+        if (currentLayout > 0) {
+            for (int i = 0; i < 4; i++) {
+                if (lengthChangeTime[i] >= 0) {
+                    float elapsed = currentTime - lengthChangeTime[i];
+                    // If timer just expired (within one frame of expiry)
+                    if (elapsed >= AMBER_DISPLAY_TIME && elapsed < AMBER_DISPLAY_TIME + args.sampleTime * 2) {
+                        updateSequencerLEDs();
+                        break;  // Only need one update
+                    }
+                }
+            }
+        }
+
+        // Check for MIDI output device connection change - auto-initialize
+        int currentMidiOutputId = midiOutput.getDeviceId();
+        if (currentMidiOutputId >= 0 && currentMidiOutputId != lastMidiOutputDeviceId) {
+            INFO("LaunchControl: MIDI output device connected (id=%d), auto-initializing", currentMidiOutputId);
+            lastMidiOutputDeviceId = currentMidiOutputId;
+            initializeDevice();
+        } else if (currentMidiOutputId < 0 && lastMidiOutputDeviceId >= 0) {
+            // Device disconnected
+            lastMidiOutputDeviceId = -1;
+            takenOver = false;
+        }
+
         // Check takeover button using trigger for edge detection
         if (takeoverTrigger.process(params[TAKEOVER_PARAM].getValue() > 0.f)) {
             INFO("LaunchControl: TAKE button pressed!");
@@ -154,22 +267,501 @@ struct Core : Module {
             outputs[FADER_OUTPUT_1 + i].setVoltage(voltage);
         }
 
+        // Process reset input (resets all sequencers)
+        if (resetTrigger.process(inputs[RESET_INPUT].getVoltage())) {
+            for (int s = 0; s < 8; s++) {
+                sequencers[s].currentStepA = 0;
+                sequencers[s].currentStepB = 0;
+                sequencers[s].currentValueIndexA = 0;
+                sequencers[s].currentValueIndexB = 0;
+                sequencers[s].alternateCounter = 0;
+            }
+            // Update LEDs if viewing a sequencer
+            if (currentLayout > 0) {
+                updateSequencerLEDs();
+            }
+        }
+
+        // Get clock voltages (Clock B normals to Clock A)
+        float clockAVoltage = inputs[CLOCK_A_INPUT].getVoltage();
+        float clockBVoltage = inputs[CLOCK_B_INPUT].isConnected() ?
+            inputs[CLOCK_B_INPUT].getVoltage() : clockAVoltage;
+
+        bool clockARose = clockTriggerA.process(clockAVoltage);
+        bool clockBRose = clockTriggerB.process(clockBVoltage);
+
+        // Process clock inputs for all sequencers
+        for (int s = 0; s < 8; s++) {
+            Sequencer& seq = sequencers[s];
+
+            if (seq.isSingleMode()) {
+                // Single mode: only use Clock A
+                if (clockARose) {
+                    processSequencerClockSingle(s);
+                }
+            } else {
+                // Dual mode: Clock A for Seq A, Clock B for Seq B
+                if (clockARose) {
+                    processSequencerClockDualA(s);
+                }
+                if (clockBRose) {
+                    processSequencerClockDualB(s);
+                }
+            }
+        }
+
+        // Update LEDs if viewing a sequencer and clock happened
+        if (currentLayout > 0 && (clockARose || clockBRose)) {
+            updateSequencerLEDs();
+        }
+
+        // Process all pulse generators
+        bool trigOutA[8], trigOutB[8];
+        for (int s = 0; s < 8; s++) {
+            trigOutA[s] = trigPulseA[s].process(args.sampleTime);
+            trigOutB[s] = trigPulseB[s].process(args.sampleTime);
+        }
+
+        // Output trigger and CV for the output sequencer
+        // outputLayout: 0 = follow currentLayout, 1-8 = fixed sequencer
+        int outSeq = (outputLayout > 0) ? outputLayout : currentLayout;
+        if (outSeq > 0) {
+            Sequencer& seq = sequencers[outSeq - 1];
+
+            // Output A
+            outputs[SEQ_TRIG_A_OUTPUT].setVoltage(trigOutA[outSeq - 1] ? 10.f : 0.f);
+            int knobIndexA = seq.isSingleMode() ? seq.currentValueIndexA : seq.currentValueIndexA;
+            float cvA = knobValues[outSeq][knobIndexA] / 127.f * 5.f;
+            outputs[SEQ_CV_A_OUTPUT].setVoltage(cvA);
+
+            // Output B
+            outputs[SEQ_TRIG_B_OUTPUT].setVoltage(trigOutB[outSeq - 1] ? 10.f : 0.f);
+            int knobIndexB = seq.isSingleMode() ? seq.currentValueIndexA : (8 + seq.currentValueIndexB);
+            float cvB = knobValues[outSeq][knobIndexB] / 127.f * 5.f;
+            outputs[SEQ_CV_B_OUTPUT].setVoltage(cvB);
+        } else {
+            outputs[SEQ_TRIG_A_OUTPUT].setVoltage(0.f);
+            outputs[SEQ_CV_A_OUTPUT].setVoltage(0.f);
+            outputs[SEQ_TRIG_B_OUTPUT].setVoltage(0.f);
+            outputs[SEQ_CV_B_OUTPUT].setVoltage(0.f);
+        }
+
         // Set connected light based on MIDI input device
         bool midiConnected = midiInput.getDeviceId() >= 0;
         lights[CONNECTED_LIGHT].setBrightness(midiConnected ? 1.f : 0.f);
 
         // Takeover light - stays on once takeover happens
         lights[TAKEOVER_LIGHT].setBrightness(takenOver ? 1.f : 0.f);
+
+        // Update and send expander message to right-side expanders
+        updateExpanderMessage();
+        if (rightExpander.module) {
+            LCXLExpanderMessage* msg = reinterpret_cast<LCXLExpanderMessage*>(rightExpander.module->leftExpander.producerMessage);
+            if (msg) {
+                *msg = expanderMessage;
+                rightExpander.module->leftExpander.messageFlipRequested = true;
+            }
+        }
+
+        // Reset trigger flags for next frame
+        for (int s = 0; s < 8; s++) {
+            seqTriggeredThisFrame[s] = false;
+        }
     }
 
-    void performTakeover() {
-        INFO("LaunchControl: performTakeover() called");
+    // Single mode clock processing: one sequencer, routing to A or B
+    void processSequencerClockSingle(int seqIndex) {
+        Sequencer& seq = sequencers[seqIndex];
+
+        // Advance step
+        seq.currentStepA = (seq.currentStepA + 1) % seq.stepLengthA;
+
+        // Check if step is active
+        if (!seq.steps[seq.currentStepA]) return;
+
+        // Apply probability
+        if (random::uniform() >= seq.probA) return;
+
+        // Advance value index
+        seq.currentValueIndexA = (seq.currentValueIndexA + 1) % seq.valueLengthA;
+
+        // Determine routing destination
+        bool fireA = false, fireB = false;
+
+        switch (seq.routingMode) {
+            case ROUTE_ALL_A:
+                fireA = true;
+                break;
+            case ROUTE_ALL_B:
+                fireB = true;
+                break;
+            case ROUTE_BERNOULLI:
+                if (random::uniform() < seq.bias) fireB = true;
+                else fireA = true;
+                break;
+            case ROUTE_ALTERNATE:
+                if (seq.alternateCounter % 2 == 0) fireA = true;
+                else fireB = true;
+                seq.alternateCounter++;
+                break;
+            case ROUTE_TWO_TWO:
+                if ((seq.alternateCounter / 2) % 2 == 0) fireA = true;
+                else fireB = true;
+                seq.alternateCounter++;
+                break;
+            case ROUTE_BURST: {
+                // Random bursts - bias controls probability of switching
+                static bool burstToA = true;
+                if (random::uniform() < seq.bias * 0.3f) burstToA = !burstToA;
+                if (burstToA) fireA = true;
+                else fireB = true;
+                break;
+            }
+            case ROUTE_PROBABILITY:
+                if (random::uniform() < seq.bias) fireB = true;
+                else fireA = true;
+                break;
+            case ROUTE_PATTERN:
+                // Odd steps to A, even to B
+                if (seq.currentStepA % 2 == 0) fireA = true;
+                else fireB = true;
+                break;
+        }
+
+        if (fireA) {
+            trigPulseA[seqIndex].trigger(1e-3f);
+            seqTriggeredThisFrame[seqIndex] = true;
+        }
+        if (fireB) {
+            trigPulseB[seqIndex].trigger(1e-3f);
+        }
+    }
+
+    // Dual mode clock A processing: Seq A step
+    void processSequencerClockDualA(int seqIndex) {
+        Sequencer& seq = sequencers[seqIndex];
+
+        // Advance step A
+        seq.currentStepA = (seq.currentStepA + 1) % seq.stepLengthA;
+
+        // Check if step is active (top row buttons = steps 0-7)
+        if (!seq.steps[seq.currentStepA]) return;
+
+        // Apply probability
+        if (random::uniform() >= seq.probA) return;
+
+        // Check for competition with B
+        bool aWantsToFire = true;
+        bool bWantsToFire = (seq.stepLengthB > 0) && seq.steps[8 + (seq.currentStepB % seq.stepLengthB)];
+
+        bool aWins = resolveCompetition(seq, aWantsToFire, bWantsToFire, true);
+
+        if (aWins) {
+            // A fires - advance value index
+            seq.currentValueIndexA = (seq.currentValueIndexA + 1) % seq.valueLengthA;
+            trigPulseA[seqIndex].trigger(1e-3f);
+            seqTriggeredThisFrame[seqIndex] = true;
+        }
+    }
+
+    // Dual mode clock B processing: Seq B step
+    void processSequencerClockDualB(int seqIndex) {
+        Sequencer& seq = sequencers[seqIndex];
+
+        // B disabled if length is 0
+        if (seq.stepLengthB <= 0) return;
+
+        // Advance step B
+        seq.currentStepB = (seq.currentStepB + 1) % seq.stepLengthB;
+
+        // Check if step is active (bottom row buttons = steps 8-15)
+        if (!seq.steps[8 + seq.currentStepB]) return;
+
+        // Apply probability
+        if (random::uniform() >= seq.probB) return;
+
+        // Check for competition with A
+        bool aWantsToFire = seq.steps[seq.currentStepA % seq.stepLengthA];
+        bool bWantsToFire = true;
+
+        bool bWins = !resolveCompetition(seq, aWantsToFire, bWantsToFire, false);
+
+        if (bWins) {
+            // B fires - advance value index
+            if (seq.valueLengthB > 0) {
+                seq.currentValueIndexB = (seq.currentValueIndexB + 1) % seq.valueLengthB;
+            }
+            trigPulseB[seqIndex].trigger(1e-3f);
+        }
+    }
+
+    // Resolve competition between A and B, returns true if A wins
+    bool resolveCompetition(Sequencer& seq, bool aWants, bool bWants, bool isAClock) {
+        // If only one wants to fire, they win
+        if (aWants && !bWants) return true;
+        if (bWants && !aWants) return false;
+        if (!aWants && !bWants) return isAClock;  // Neither wants, default
+
+        // Both want to fire - competition!
+        switch (seq.competitionMode) {
+            case COMP_INDEPENDENT:
+                // Both can fire
+                return true;  // A always wins in independent mode
+
+            case COMP_STEAL:
+                // Bernoulli decides
+                return random::uniform() >= seq.bias;
+
+            case COMP_A_PRIORITY:
+                // A wins if bias is high enough
+                return random::uniform() < (0.5f + seq.bias * 0.5f);
+
+            case COMP_B_PRIORITY:
+                // B wins if bias is high enough
+                return random::uniform() >= (0.5f + seq.bias * 0.5f);
+
+            case COMP_MOMENTUM: {
+                // Winner gets boost next time
+                bool aWins = random::uniform() < seq.momentumA;
+                if (aWins) {
+                    seq.momentumA = std::min(1.0f, seq.momentumA + seq.bias * 0.2f);
+                    seq.momentumB = std::max(0.0f, seq.momentumB - seq.bias * 0.1f);
+                } else {
+                    seq.momentumB = std::min(1.0f, seq.momentumB + seq.bias * 0.2f);
+                    seq.momentumA = std::max(0.0f, seq.momentumA - seq.bias * 0.1f);
+                }
+                return aWins;
+            }
+
+            case COMP_REVENGE: {
+                // Loser gets boost next time
+                bool aWins;
+                if (seq.lastWinnerA) {
+                    // B has revenge chance
+                    aWins = random::uniform() >= seq.bias * 0.7f;
+                } else {
+                    // A has revenge chance
+                    aWins = random::uniform() < (1.0f - seq.bias * 0.7f);
+                }
+                seq.lastWinnerA = aWins;
+                return aWins;
+            }
+
+            case COMP_ECHO:
+                // Winner fires, loser echoes on next clock
+                if (isAClock) {
+                    bool aWins = random::uniform() >= seq.bias;
+                    if (!aWins) seq.pendingEchoA = true;
+                    return aWins;
+                } else {
+                    bool bWins = random::uniform() < seq.bias;
+                    if (!bWins) seq.pendingEchoB = true;
+                    return !bWins;
+                }
+
+            case COMP_VALUE_THEFT:
+                // Winner uses combined CV - handled in output stage
+                return random::uniform() >= seq.bias;
+        }
+
+        return true;  // Default A wins
+    }
+
+    // Update LED display for current sequencer
+    void updateSequencerLEDs() {
+        if (currentLayout <= 0) return;
+
+        Sequencer& seq = sequencers[currentLayout - 1];
+
+        INFO("LED: valA=%d valB=%d mode=%s", seq.valueLengthA, seq.valueLengthB, seq.isSingleMode() ? "SINGLE" : "DUAL");
+
+        if (seq.isSingleMode()) {
+            for (int i = 0; i < 16; i++) {
+                updateStepLEDSingle(i, seq);
+            }
+            updateValueKnobLEDsSingle(seq);
+        } else {
+            for (int i = 0; i < 8; i++) {
+                updateStepLEDDual(i, seq, true);
+                updateStepLEDDual(8 + i, seq, false);
+            }
+            updateValueKnobLEDsDual(seq);
+        }
+
+        for (int i = 16; i < 24; i++) {
+            updateKnobLED(i);
+        }
+    }
+
+    void updateStepLEDSingle(int stepIndex, const Sequencer& seq) {
+        bool showAmber = shouldShowAmber(2);  // stepLengthA timer
+        uint8_t color;
+        if (stepIndex >= seq.stepLengthA) {
+            color = LCXL::LED_OFF;  // Out of range
+        } else if (showAmber && stepIndex == seq.stepLengthA - 1) {
+            // Boundary marker (only while adjusting) - but playhead takes priority
+            if (stepIndex == seq.currentStepA) {
+                color = LCXL::LED_RED_FULL;  // Playhead at boundary
+            } else {
+                color = LCXL::LED_AMBER_FULL;  // Boundary
+            }
+        } else if (stepIndex == seq.currentStepA) {
+            color = LCXL::LED_RED_FULL;  // Playhead
+        } else if (seq.steps[stepIndex]) {
+            color = LCXL::LED_GREEN_FULL;  // Active step
+        } else {
+            color = LCXL::LED_OFF;  // Inactive step
+        }
+        sendButtonLEDSysEx(stepIndex, color);
+    }
+
+    void updateStepLEDDual(int buttonIndex, const Sequencer& seq, bool isSeqA) {
+        int localStep = isSeqA ? buttonIndex : (buttonIndex - 8);
+        int stepLength = isSeqA ? seq.stepLengthA : seq.stepLengthB;
+        int currentStep = isSeqA ? seq.currentStepA : seq.currentStepB;
+        bool showAmber = shouldShowAmber(isSeqA ? 2 : 3);  // stepLengthA or stepLengthB timer
+
+        uint8_t color;
+        if (stepLength == 0 || localStep >= stepLength) {
+            color = LCXL::LED_OFF;  // Out of range or seq B disabled
+        } else if (showAmber && localStep == stepLength - 1) {
+            // Boundary marker (only while adjusting) - but playhead takes priority
+            if (localStep == currentStep) {
+                color = LCXL::LED_RED_FULL;  // Playhead at boundary
+            } else {
+                color = LCXL::LED_AMBER_FULL;  // Boundary
+            }
+        } else if (localStep == currentStep) {
+            color = LCXL::LED_RED_FULL;  // Playhead
+        } else if (seq.steps[buttonIndex]) {
+            color = LCXL::LED_GREEN_FULL;  // Active step
+        } else {
+            color = LCXL::LED_OFF;  // Inactive step
+        }
+        sendButtonLEDSysEx(buttonIndex, color);
+    }
+
+    // Helper to get soft takeover color for a knob
+    uint8_t getSoftTakeoverColor(int knobIndex) {
+        if (lastPhysicalKnobPos[knobIndex] < 0) {
+            // Unknown physical position
+            return LCXL::LED_OFF;
+        }
+        int storedValue = knobValues[currentLayout][knobIndex];
+        int physicalPos = lastPhysicalKnobPos[knobIndex];
+
+        if (knobPickedUp[knobIndex] || std::abs(physicalPos - storedValue) <= 2) {
+            return LCXL::LED_GREEN_FULL;  // Picked up
+        } else if (physicalPos < storedValue) {
+            return LCXL::LED_YELLOW_FULL;  // Turn right to catch up
+        } else {
+            return LCXL::LED_RED_FULL;  // Turn left to catch up
+        }
+    }
+
+    // Check if amber should be shown for a length parameter (within 200ms of last change)
+    bool shouldShowAmber(int lengthParamIndex) {
+        if (lengthChangeTime[lengthParamIndex] < 0) return false;
+        return (currentTime - lengthChangeTime[lengthParamIndex]) < AMBER_DISPLAY_TIME;
+    }
+
+    void updateValueKnobLEDsSingle(const Sequencer& seq) {
+        // Single mode: all 16 knobs show one sequence
+        // valueLengthA = how many knobs are active (1-16)
+        bool showAmber = shouldShowAmber(0);  // valueLengthA timer
+        for (int i = 0; i < 16; i++) {
+            uint8_t color;
+
+            if (i >= seq.valueLengthA) {
+                // AFTER the length = OFF
+                color = LCXL::LED_OFF;
+            } else if (showAmber && i == seq.valueLengthA - 1) {
+                // Last active position = AMBER (only while adjusting)
+                color = LCXL::LED_AMBER_FULL;
+            } else {
+                // In range = show soft takeover color
+                color = getSoftTakeoverColor(i);
+            }
+            sendKnobLEDSysEx(i, color);
+        }
+    }
+
+    void updateValueKnobLEDsDual(const Sequencer& seq) {
+        bool showAmberA = shouldShowAmber(0);  // valueLengthA timer
+        bool showAmberB = shouldShowAmber(1);  // valueLengthB timer
+
+        // Row 1: Seq A values (knobs 0-7)
+        for (int i = 0; i < 8; i++) {
+            uint8_t color;
+            if (i >= seq.valueLengthA) {
+                color = LCXL::LED_OFF;
+            } else if (showAmberA && i == seq.valueLengthA - 1) {
+                color = LCXL::LED_AMBER_FULL;
+            } else {
+                color = getSoftTakeoverColor(i);
+            }
+            sendKnobLEDSysEx(i, color);
+        }
+
+        // Row 2: Seq B values (knobs 8-15)
+        for (int i = 0; i < 8; i++) {
+            int knobIndex = 8 + i;
+            uint8_t color;
+            if (seq.valueLengthB == 0 || i >= seq.valueLengthB) {
+                color = LCXL::LED_OFF;
+            } else if (showAmberB && i == seq.valueLengthB - 1) {
+                color = LCXL::LED_AMBER_FULL;
+            } else {
+                color = getSoftTakeoverColor(knobIndex);
+            }
+            sendKnobLEDSysEx(knobIndex, color);
+        }
+    }
+
+    void updateExpanderMessage() {
+        expanderMessage.moduleId = id;
+        expanderMessage.currentLayout = currentLayout;
+
+        // Copy fader values
+        for (int i = 0; i < 8; i++) {
+            expanderMessage.faderValues[i] = faderValues[i];
+        }
+
+        // Copy knob values for all layouts
+        for (int layout = 0; layout < 9; layout++) {
+            for (int i = 0; i < 24; i++) {
+                expanderMessage.knobValues[layout][i] = knobValues[layout][i];
+            }
+        }
+
+        // Copy button states
+        for (int i = 0; i < 16; i++) {
+            expanderMessage.buttonStates[i] = buttonStates[i];
+        }
+
+        // Copy sequencer data
+        for (int s = 0; s < 8; s++) {
+            auto& dst = expanderMessage.sequencers[s];
+            auto& src = sequencers[s];
+            for (int i = 0; i < 16; i++) {
+                dst.steps[i] = src.steps[i];
+            }
+            dst.loopStart = 0;  // No longer used - kept for compatibility
+            dst.loopEnd = src.stepLengthA - 1;
+            dst.currentStep = src.currentStepA;
+            dst.currentValueIndex = src.currentValueIndexA;
+            dst.valueStart = 0;
+            dst.valueEnd = src.valueLengthA - 1;
+            dst.triggered = seqTriggeredThisFrame[s];
+        }
+    }
+
+    void initializeDevice() {
+        INFO("LaunchControl: initializeDevice() called");
 
         // Check if MIDI output is connected
         if (midiOutput.getDeviceId() < 0) {
             INFO("LaunchControl: No MIDI output device selected!");
-            // Still set takenOver so light turns on
-            takenOver = true;
             return;
         }
 
@@ -182,6 +774,12 @@ struct Core : Module {
         takenOver = true;
         // Update LEDs with our state
         updateAllLEDs();
+        INFO("LaunchControl: initializeDevice() complete");
+    }
+
+    void performTakeover() {
+        INFO("LaunchControl: performTakeover() called");
+        initializeDevice();
         INFO("LaunchControl: performTakeover() complete");
     }
 
@@ -260,22 +858,112 @@ struct Core : Module {
     }
 
     void processKnobChange(int knobIndex, int value) {
-        // Soft takeover logic
-        int storedValue = knobValues[currentLayout][knobIndex];
+        // In sequencer mode, bottom row knobs (16-23) are parameters - bypass soft takeover
+        bool isParameterKnob = (currentLayout > 0 && knobIndex >= 16);
 
-        if (!knobPickedUp[knobIndex]) {
-            // Check if we've reached the pickup zone (±2)
-            if (std::abs(value - storedValue) <= 2) {
-                knobPickedUp[knobIndex] = true;
+        INFO("KNOB: idx=%d val=%d isParam=%d", knobIndex, value, isParameterKnob ? 1 : 0);
+
+        if (isParameterKnob) {
+            // Parameter knobs work immediately without soft takeover
+            knobValues[currentLayout][knobIndex] = value;
+            knobPickedUp[knobIndex] = true;
+            int paramIdx = knobIndex - 16;
+            INFO("PARAM: paramIdx=%d", paramIdx);
+            processSequencerParameter(paramIdx, value);
+        } else {
+            // Soft takeover logic for value knobs
+            int storedValue = knobValues[currentLayout][knobIndex];
+
+            if (!knobPickedUp[knobIndex]) {
+                // Check if we've reached the pickup zone (±2)
+                if (std::abs(value - storedValue) <= 2) {
+                    knobPickedUp[knobIndex] = true;
+                }
+            }
+
+            if (knobPickedUp[knobIndex]) {
+                knobValues[currentLayout][knobIndex] = value;
             }
         }
 
-        if (knobPickedUp[knobIndex]) {
-            knobValues[currentLayout][knobIndex] = value;
-        }
-
         lastPhysicalKnobPos[knobIndex] = value;
-        updateKnobLED(knobIndex);
+
+        // Update LED - in sequencer mode, value knobs show sequencer state with soft takeover
+        if (currentLayout > 0 && knobIndex < 16) {
+            Sequencer& seq = sequencers[currentLayout - 1];
+            if (seq.isSingleMode()) {
+                updateValueKnobLEDsSingle(seq);
+            } else {
+                updateValueKnobLEDsDual(seq);
+            }
+        } else {
+            updateKnobLED(knobIndex);
+        }
+    }
+
+    void processSequencerParameter(int paramIndex, int value) {
+        // paramIndex: 0=VAL-A, 1=VAL-B, 2=STEP-A, 3=STEP-B, 4=PROB-A, 5=PROB-B, 6=BIAS, 7=reserved
+        Sequencer& seq = sequencers[currentLayout - 1];
+
+        switch (paramIndex) {
+            case 0:  // Value Length A (1-16)
+                seq.valueLengthA = 1 + (value * 15 / 127);  // Map 0-127 to 1-16
+                if (seq.currentValueIndexA >= seq.valueLengthA) {
+                    seq.currentValueIndexA = 0;
+                }
+                lengthChangeTime[0] = currentTime;  // Record time for amber display
+                INFO("SET: valLenA=%d mode=%s", seq.valueLengthA, seq.isSingleMode() ? "SINGLE" : "DUAL");
+                updateSequencerLEDs();
+                break;
+
+            case 1:  // Value Length B (0-8)
+                seq.valueLengthB = value * 9 / 128;  // Map 0-127 to 0-8
+                if (seq.valueLengthB > 0 && seq.currentValueIndexB >= seq.valueLengthB) {
+                    seq.currentValueIndexB = 0;
+                }
+                lengthChangeTime[1] = currentTime;  // Record time for amber display
+                INFO("SET: valLenB=%d mode=%s", seq.valueLengthB, seq.isSingleMode() ? "SINGLE" : "DUAL");
+                updateSequencerLEDs();
+                break;
+
+            case 2:  // Step Length A (1-16)
+                seq.stepLengthA = 1 + (value * 15 / 127);  // Map 0-127 to 1-16
+                if (seq.currentStepA >= seq.stepLengthA) {
+                    seq.currentStepA = 0;
+                }
+                lengthChangeTime[2] = currentTime;  // Record time for amber display
+                updateSequencerLEDs();
+                INFO("LaunchControl: Seq %d stepLengthA = %d", currentLayout, seq.stepLengthA);
+                break;
+
+            case 3:  // Step Length B (0-8)
+                seq.stepLengthB = value * 9 / 128;  // Map 0-127 to 0-8
+                if (seq.stepLengthB > 0 && seq.currentStepB >= seq.stepLengthB) {
+                    seq.currentStepB = 0;
+                }
+                lengthChangeTime[3] = currentTime;  // Record time for amber display
+                updateSequencerLEDs();
+                INFO("LaunchControl: Seq %d stepLengthB = %d", currentLayout, seq.stepLengthB);
+                break;
+
+            case 4:  // Probability A (0-100%)
+                seq.probA = value / 127.f;
+                INFO("LaunchControl: Seq %d probA = %.2f", currentLayout, seq.probA);
+                break;
+
+            case 5:  // Probability B (0-100%)
+                seq.probB = value / 127.f;
+                INFO("LaunchControl: Seq %d probB = %.2f", currentLayout, seq.probB);
+                break;
+
+            case 6:  // Bias/Amount (0-100%)
+                seq.bias = value / 127.f;
+                INFO("LaunchControl: Seq %d bias = %.2f", currentLayout, seq.bias);
+                break;
+
+            case 7:  // Reserved
+                break;
+        }
     }
 
     void processNoteOn(int note, int velocity) {
@@ -293,7 +981,36 @@ struct Core : Module {
             return;
         }
 
-        // If Device is held, check for layout switching
+        // Check for Record Arm button
+        if (note == LCXL::BTN_REC_ARM) {
+            INFO("LaunchControl: Record Arm button HELD");
+            recArmHeld = true;
+            // Show current mode on LEDs
+            if (currentLayout > 0) {
+                showModeSelectionLEDs();
+            }
+            return;
+        }
+
+        // If Record Arm is held in sequencer mode, select routing/competition mode
+        if (recArmHeld && currentLayout > 0) {
+            for (int i = 0; i < 8; i++) {
+                if (note == LCXL::TRACK_FOCUS[i]) {
+                    Sequencer& seq = sequencers[currentLayout - 1];
+                    if (seq.isSingleMode()) {
+                        seq.routingMode = i;
+                        INFO("LaunchControl: Seq %d routing mode = %d", currentLayout, i);
+                    } else {
+                        seq.competitionMode = i;
+                        INFO("LaunchControl: Seq %d competition mode = %d", currentLayout, i);
+                    }
+                    showModeSelectionLEDs();  // Update LED feedback
+                    return;
+                }
+            }
+        }
+
+        // If Device is held, check for layout switching and utilities
         if (deviceButtonHeld) {
             INFO("LaunchControl: Device held, checking for layout switch...");
             // Track Focus 1 = return to default
@@ -301,6 +1018,16 @@ struct Core : Module {
                 INFO("LaunchControl: Switching to default layout");
                 switchLayout(0);
                 return;
+            }
+
+            // Track Focus 2-8 = utilities (only in sequencer mode)
+            if (currentLayout > 0) {
+                for (int i = 1; i < 8; i++) {
+                    if (note == LCXL::TRACK_FOCUS[i]) {
+                        executeSequencerUtility(i);
+                        return;
+                    }
+                }
             }
 
             // Track Control 1-8 = enter sequencer 1-8
@@ -323,15 +1050,96 @@ struct Core : Module {
         }
     }
 
+    void showModeSelectionLEDs() {
+        if (currentLayout <= 0) return;
+        Sequencer& seq = sequencers[currentLayout - 1];
+
+        // Show current mode on Track Focus buttons
+        int currentMode = seq.isSingleMode() ? seq.routingMode : seq.competitionMode;
+        for (int i = 0; i < 8; i++) {
+            uint8_t color = (i == currentMode) ? LCXL::LED_GREEN_FULL : LCXL::LED_OFF;
+            sendButtonLEDSysEx(i, color);
+        }
+    }
+
+    void executeSequencerUtility(int utilityIndex) {
+        Sequencer& seq = sequencers[currentLayout - 1];
+
+        switch (utilityIndex) {
+            case 1:  // Copy current sequencer
+                copyBuffer = seq;
+                INFO("LaunchControl: Copied sequencer %d", currentLayout);
+                break;
+
+            case 2:  // Paste to current sequencer
+                seq.steps[0] = copyBuffer.steps[0];  // Copy step pattern
+                for (int i = 0; i < 16; i++) {
+                    seq.steps[i] = copyBuffer.steps[i];
+                }
+                INFO("LaunchControl: Pasted to sequencer %d", currentLayout);
+                updateSequencerLEDs();
+                break;
+
+            case 3:  // Clear all steps
+                for (int i = 0; i < 16; i++) {
+                    seq.steps[i] = false;
+                }
+                INFO("LaunchControl: Cleared sequencer %d", currentLayout);
+                updateSequencerLEDs();
+                break;
+
+            case 4:  // Randomize steps
+                for (int i = 0; i < 16; i++) {
+                    seq.steps[i] = random::uniform() > 0.5f;
+                }
+                INFO("LaunchControl: Randomized steps in sequencer %d", currentLayout);
+                updateSequencerLEDs();
+                break;
+
+            case 5:  // Randomize values
+                for (int i = 0; i < 16; i++) {
+                    knobValues[currentLayout][i] = static_cast<int>(random::uniform() * 127);
+                }
+                INFO("LaunchControl: Randomized values in sequencer %d", currentLayout);
+                updateSequencerLEDs();
+                break;
+
+            case 6:  // Invert steps
+                for (int i = 0; i < 16; i++) {
+                    seq.steps[i] = !seq.steps[i];
+                }
+                INFO("LaunchControl: Inverted steps in sequencer %d", currentLayout);
+                updateSequencerLEDs();
+                break;
+
+            case 7:  // Reset playheads
+                seq.currentStepA = 0;
+                seq.currentStepB = 0;
+                seq.currentValueIndexA = 0;
+                seq.currentValueIndexB = 0;
+                seq.alternateCounter = 0;
+                INFO("LaunchControl: Reset playheads in sequencer %d", currentLayout);
+                updateSequencerLEDs();
+                break;
+        }
+    }
+
+    // Copy buffer for sequencer copy/paste
+    Sequencer copyBuffer;
+
     void processNoteOff(int note) {
         if (note == LCXL::BTN_DEVICE) {
             deviceButtonHeld = false;
             return;
         }
 
-        // Handle step button release in sequencer mode
-        if (currentLayout > 0) {
-            processSequencerModeButtonRelease(note);
+        if (note == LCXL::BTN_REC_ARM) {
+            recArmHeld = false;
+            // Restore normal LEDs when releasing Record Arm
+            if (currentLayout > 0) {
+                updateSequencerLEDs();
+            }
+            return;
         }
     }
 
@@ -371,46 +1179,16 @@ struct Core : Module {
         int seqIndex = currentLayout - 1;
         Sequencer& seq = sequencers[seqIndex];
 
-        if (heldStepIndex < 0) {
-            // No step currently held - this becomes the held step
-            heldStepIndex = stepIndex;
-            loopPointSet = false;
-            INFO("LaunchControl: Holding step %d for loop selection", stepIndex);
+        // Toggle step on/off
+        seq.steps[stepIndex] = !seq.steps[stepIndex];
+        INFO("LaunchControl: Toggled step %d", stepIndex);
+
+        // Update LED for this step
+        if (seq.isSingleMode()) {
+            updateStepLEDSingle(stepIndex, seq);
         } else {
-            // Another step is held - set loop points!
-            int startStep = std::min(heldStepIndex, stepIndex);
-            int endStep = std::max(heldStepIndex, stepIndex);
-
-            seq.loopStart = startStep;
-            seq.loopEnd = endStep;
-            loopPointSet = true;
-
-            INFO("LaunchControl: Set loop points: %d to %d", startStep, endStep);
-
-            // Update LEDs to show new loop points
-            for (int i = 0; i < 16; i++) {
-                updateStepLED(i, seq);
-            }
-        }
-    }
-
-    void processSequencerModeButtonRelease(int note) {
-        int stepIndex = getStepIndexFromNote(note);
-        if (stepIndex < 0) return;
-
-        // Only process if this is the held step being released
-        if (stepIndex == heldStepIndex) {
-            if (!loopPointSet) {
-                // No loop point was set - toggle the step
-                int seqIndex = currentLayout - 1;
-                Sequencer& seq = sequencers[seqIndex];
-                seq.steps[stepIndex] = !seq.steps[stepIndex];
-                updateStepLED(stepIndex, seq);
-                INFO("LaunchControl: Toggled step %d", stepIndex);
-            }
-            // Reset held state
-            heldStepIndex = -1;
-            loopPointSet = false;
+            bool isSeqA = stepIndex < 8;
+            updateStepLEDDual(stepIndex, seq, isSeqA);
         }
     }
 
@@ -456,36 +1234,20 @@ struct Core : Module {
         sendButtonLEDSysEx(buttonIndex, color);
     }
 
-    void updateStepLED(int stepIndex, const Sequencer& seq) {
-        uint8_t color;
-        if (stepIndex == seq.currentStep) {
-            color = LCXL::LED_RED_FULL;  // Playhead
-        } else if (stepIndex == seq.loopStart || stepIndex == seq.loopEnd) {
-            color = LCXL::LED_AMBER_FULL;  // Loop markers
-        } else if (seq.steps[stepIndex]) {
-            color = LCXL::LED_GREEN_FULL;  // Active step
-        } else {
-            color = LCXL::LED_OFF;  // Inactive step
-        }
-        sendButtonLEDSysEx(stepIndex, color);
-    }
-
     void updateAllLEDs() {
-        // Update all knob LEDs
-        for (int i = 0; i < 24; i++) {
-            updateKnobLED(i);
-        }
-
-        // Update button LEDs based on current layout
+        // Update knob LEDs based on current layout
         if (currentLayout == 0) {
+            // Default mode: all knobs use standard soft-takeover coloring
+            for (int i = 0; i < 24; i++) {
+                updateKnobLED(i);
+            }
+            // Update button LEDs for default mode
             for (int i = 0; i < 16; i++) {
                 updateButtonLED(i, buttonStates[i]);
             }
         } else {
-            Sequencer& seq = sequencers[currentLayout - 1];
-            for (int i = 0; i < 16; i++) {
-                updateStepLED(i, seq);
-            }
+            // Sequencer mode: use new LED functions
+            updateSequencerLEDs();
         }
     }
 
@@ -547,6 +1309,7 @@ struct Core : Module {
 
         // Save current layout
         json_object_set_new(rootJ, "currentLayout", json_integer(currentLayout));
+        json_object_set_new(rootJ, "outputLayout", json_integer(outputLayout));
 
         // Save fader values
         json_t* fadersJ = json_array();
@@ -577,15 +1340,29 @@ struct Core : Module {
         json_t* seqsJ = json_array();
         for (int s = 0; s < 8; s++) {
             json_t* seqJ = json_object();
+
+            // Save steps
             json_t* stepsJ = json_array();
             for (int i = 0; i < 16; i++) {
                 json_array_append_new(stepsJ, json_boolean(sequencers[s].steps[i]));
             }
             json_object_set_new(seqJ, "steps", stepsJ);
-            json_object_set_new(seqJ, "loopStart", json_integer(sequencers[s].loopStart));
-            json_object_set_new(seqJ, "loopEnd", json_integer(sequencers[s].loopEnd));
-            json_object_set_new(seqJ, "valueStart", json_integer(sequencers[s].valueStart));
-            json_object_set_new(seqJ, "valueEnd", json_integer(sequencers[s].valueEnd));
+
+            // Save lengths
+            json_object_set_new(seqJ, "valueLengthA", json_integer(sequencers[s].valueLengthA));
+            json_object_set_new(seqJ, "valueLengthB", json_integer(sequencers[s].valueLengthB));
+            json_object_set_new(seqJ, "stepLengthA", json_integer(sequencers[s].stepLengthA));
+            json_object_set_new(seqJ, "stepLengthB", json_integer(sequencers[s].stepLengthB));
+
+            // Save probability and bias
+            json_object_set_new(seqJ, "probA", json_real(sequencers[s].probA));
+            json_object_set_new(seqJ, "probB", json_real(sequencers[s].probB));
+            json_object_set_new(seqJ, "bias", json_real(sequencers[s].bias));
+
+            // Save modes
+            json_object_set_new(seqJ, "competitionMode", json_integer(sequencers[s].competitionMode));
+            json_object_set_new(seqJ, "routingMode", json_integer(sequencers[s].routingMode));
+
             json_array_append_new(seqsJ, seqJ);
         }
         json_object_set_new(rootJ, "sequencers", seqsJ);
@@ -604,6 +1381,8 @@ struct Core : Module {
         // Load current layout
         json_t* layoutJ = json_object_get(rootJ, "currentLayout");
         if (layoutJ) currentLayout = json_integer_value(layoutJ);
+        json_t* outLayoutJ = json_object_get(rootJ, "outputLayout");
+        if (outLayoutJ) outputLayout = json_integer_value(outLayoutJ);
 
         // Load fader values
         json_t* fadersJ = json_object_get(rootJ, "faders");
@@ -643,6 +1422,7 @@ struct Core : Module {
             for (int s = 0; s < 8; s++) {
                 json_t* seqJ = json_array_get(seqsJ, s);
                 if (seqJ) {
+                    // Load steps
                     json_t* stepsJ = json_object_get(seqJ, "steps");
                     if (stepsJ) {
                         for (int i = 0; i < 16; i++) {
@@ -650,14 +1430,30 @@ struct Core : Module {
                             if (valJ) sequencers[s].steps[i] = json_boolean_value(valJ);
                         }
                     }
-                    json_t* lsJ = json_object_get(seqJ, "loopStart");
-                    if (lsJ) sequencers[s].loopStart = json_integer_value(lsJ);
-                    json_t* leJ = json_object_get(seqJ, "loopEnd");
-                    if (leJ) sequencers[s].loopEnd = json_integer_value(leJ);
-                    json_t* vsJ = json_object_get(seqJ, "valueStart");
-                    if (vsJ) sequencers[s].valueStart = json_integer_value(vsJ);
-                    json_t* veJ = json_object_get(seqJ, "valueEnd");
-                    if (veJ) sequencers[s].valueEnd = json_integer_value(veJ);
+
+                    // Load lengths
+                    json_t* vlA = json_object_get(seqJ, "valueLengthA");
+                    if (vlA) sequencers[s].valueLengthA = json_integer_value(vlA);
+                    json_t* vlB = json_object_get(seqJ, "valueLengthB");
+                    if (vlB) sequencers[s].valueLengthB = json_integer_value(vlB);
+                    json_t* slA = json_object_get(seqJ, "stepLengthA");
+                    if (slA) sequencers[s].stepLengthA = json_integer_value(slA);
+                    json_t* slB = json_object_get(seqJ, "stepLengthB");
+                    if (slB) sequencers[s].stepLengthB = json_integer_value(slB);
+
+                    // Load probability and bias
+                    json_t* pA = json_object_get(seqJ, "probA");
+                    if (pA) sequencers[s].probA = json_real_value(pA);
+                    json_t* pB = json_object_get(seqJ, "probB");
+                    if (pB) sequencers[s].probB = json_real_value(pB);
+                    json_t* biasJ = json_object_get(seqJ, "bias");
+                    if (biasJ) sequencers[s].bias = json_real_value(biasJ);
+
+                    // Load modes
+                    json_t* compMode = json_object_get(seqJ, "competitionMode");
+                    if (compMode) sequencers[s].competitionMode = json_integer_value(compMode);
+                    json_t* routMode = json_object_get(seqJ, "routingMode");
+                    if (routMode) sequencers[s].routingMode = json_integer_value(routMode);
                 }
             }
         }
@@ -682,9 +1478,20 @@ struct CoreWidget : ModuleWidget {
         addParam(createParamCentered<VCVButton>(mm2px(Vec(20, 22)), module, Core::TAKEOVER_PARAM));
         addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(27, 22)), module, Core::TAKEOVER_LIGHT));
 
-        // Fader outputs
-        float yStart = 35.0f;
-        float ySpacing = 10.0f;
+        // Clock and Reset inputs (left side)
+        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10, 35)), module, Core::CLOCK_A_INPUT));
+        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10, 47)), module, Core::CLOCK_B_INPUT));
+        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10, 59)), module, Core::RESET_INPUT));
+
+        // Sequencer outputs (right side)
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 35)), module, Core::SEQ_TRIG_A_OUTPUT));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 44)), module, Core::SEQ_CV_A_OUTPUT));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 53)), module, Core::SEQ_TRIG_B_OUTPUT));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 62)), module, Core::SEQ_CV_B_OUTPUT));
+
+        // Fader outputs (bottom section)
+        float yStart = 75.0f;
+        float ySpacing = 7.0f;
         for (int i = 0; i < 8; i++) {
             addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, yStart + i * ySpacing)), module, Core::FADER_OUTPUT_1 + i));
         }
@@ -701,6 +1508,23 @@ struct CoreWidget : ModuleWidget {
         menu->addChild(new MenuSeparator);
         menu->addChild(createMenuLabel("MIDI Output"));
         app::appendMidiMenu(menu, &module->midiOutput);
+
+        menu->addChild(new MenuSeparator);
+        menu->addChild(createMenuLabel("Sequencer Output"));
+
+        // Option to follow current view
+        menu->addChild(createCheckMenuItem("Follow view", "",
+            [=]() { return module->outputLayout == 0; },
+            [=]() { module->outputLayout = 0; }
+        ));
+
+        // Options for each sequencer
+        for (int i = 1; i <= 8; i++) {
+            menu->addChild(createCheckMenuItem(string::f("Sequencer %d", i), "",
+                [=]() { return module->outputLayout == i; },
+                [=]() { module->outputLayout = i; }
+            ));
+        }
     }
 };
 
