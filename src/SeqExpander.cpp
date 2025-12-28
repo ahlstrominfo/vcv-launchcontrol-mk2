@@ -1,6 +1,23 @@
 #include "plugin.hpp"
 #include "ExpanderMessage.hpp"
 
+// Helper to convert knob value to voltage based on range and bipolar settings
+inline float knobToVoltage(int knobValue, int voltageRange, bool bipolar) {
+    float normalized = knobValue / 127.f;  // 0.0 to 1.0
+    float maxVoltage;
+    switch (voltageRange) {
+        case 0: maxVoltage = 5.f; break;   // Green: 5V
+        case 1: maxVoltage = 10.f; break;  // Amber: 10V
+        case 2: maxVoltage = 1.f; break;   // Red: 1V
+        default: maxVoltage = 5.f; break;
+    }
+    if (bipolar) {
+        return normalized * maxVoltage - (maxVoltage / 2.f);  // -max/2 to +max/2
+    } else {
+        return normalized * maxVoltage;  // 0 to max
+    }
+}
+
 struct SeqExpander : Module {
     enum ParamId {
         PARAMS_LEN
@@ -78,14 +95,14 @@ struct SeqExpander : Module {
                     outputs[TRIG_A_OUTPUT + s].setVoltage(triggerPulsesA[s].process(args.sampleTime) ? 10.f : 0.f);
                     outputs[TRIG_B_OUTPUT + s].setVoltage(triggerPulsesB[s].process(args.sampleTime) ? 10.f : 0.f);
 
-                    // Output CV A from value knob (0-5V at 1V/oct)
+                    // Output CV A from value knob with voltage range/bipolar settings
                     int knobIndexA = seq.currentValueIndexA;
-                    float cvA = msg->knobValues[layout][knobIndexA] / 127.f * 5.f;
+                    float cvA = knobToVoltage(msg->knobValues[layout][knobIndexA], seq.voltageRangeA, seq.bipolarA);
                     outputs[CV_A_OUTPUT + s].setVoltage(cvA);
 
-                    // Output CV B from value knob (0-5V at 1V/oct)
+                    // Output CV B from value knob with voltage range/bipolar settings
                     int knobIndexB = seq.isValueSingleMode ? seq.currentValueIndexA : (8 + seq.currentValueIndexB);
-                    float cvB = msg->knobValues[layout][knobIndexB] / 127.f * 5.f;
+                    float cvB = knobToVoltage(msg->knobValues[layout][knobIndexB], seq.voltageRangeB, seq.bipolarB);
                     outputs[CV_B_OUTPUT + s].setVoltage(cvB);
                 }
 

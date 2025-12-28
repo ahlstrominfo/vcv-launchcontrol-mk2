@@ -153,6 +153,12 @@ struct Core : Module {
         int competitionMode = COMP_INDEPENDENT;  // For dual mode
         int routingMode = ROUTE_ALL_A;           // For single mode
 
+        // Voltage settings (0=5V green, 1=10V amber, 2=1V red)
+        int voltageRangeA = 0;
+        int voltageRangeB = 0;
+        bool bipolarA = false;
+        bool bipolarB = false;
+
         // Playback state
         int currentStepA = 0;           // Current step position for Seq A
         int currentStepB = 0;           // Current step position for Seq B
@@ -190,6 +196,17 @@ struct Core : Module {
     bool seqTriggeredAThisFrame[8] = {false};  // Track which sequencers triggered on A
     bool seqTriggeredBThisFrame[8] = {false};  // Track which sequencers triggered on B
 
+    // Last change tracking for InfoDisplay
+    LastChangeInfo lastChange;
+
+    void recordChange(ChangeType type, int seq, int value, int step = 0) {
+        lastChange.type = type;
+        lastChange.sequencer = seq;
+        lastChange.value = value;
+        lastChange.step = step;
+        lastChange.timestamp = currentTime;
+    }
+
     Core() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
 
@@ -222,11 +239,9 @@ struct Core : Module {
         leftExpander.producerMessage = &leftMessages[0];
         leftExpander.consumerMessage = &leftMessages[1];
 
-        INFO("LaunchControl: Core module created");
     }
 
     void onAdd(const AddEvent& e) override {
-        INFO("LaunchControl: Module added to rack");
         Module::onAdd(e);
     }
 
@@ -254,7 +269,6 @@ struct Core : Module {
         // Check for MIDI output device connection change - auto-initialize
         int currentMidiOutputId = midiOutput.getDeviceId();
         if (currentMidiOutputId >= 0 && currentMidiOutputId != lastMidiOutputDeviceId) {
-            INFO("LaunchControl: MIDI output device connected (id=%d), auto-initializing", currentMidiOutputId);
             lastMidiOutputDeviceId = currentMidiOutputId;
             initializeDevice();
         } else if (currentMidiOutputId < 0 && lastMidiOutputDeviceId >= 0) {
@@ -265,7 +279,6 @@ struct Core : Module {
 
         // Check takeover button using trigger for edge detection
         if (takeoverTrigger.process(params[TAKEOVER_PARAM].getValue() > 0.f)) {
-            INFO("LaunchControl: TAKE button pressed!");
             if (!takenOver) {
                 performTakeover();
             }
@@ -377,13 +390,13 @@ struct Core : Module {
             // Output A
             outputs[SEQ_TRIG_A_OUTPUT].setVoltage(trigOutA[outSeq - 1] ? 10.f : 0.f);
             int knobIndexA = seq.isValueSingleMode() ? seq.currentValueIndexA : seq.currentValueIndexA;
-            float cvA = knobValues[outSeq][knobIndexA] / 127.f * 5.f;
+            float cvA = knobToVoltage(knobValues[outSeq][knobIndexA], seq.voltageRangeA, seq.bipolarA);
             outputs[SEQ_CV_A_OUTPUT].setVoltage(cvA);
 
             // Output B
             outputs[SEQ_TRIG_B_OUTPUT].setVoltage(trigOutB[outSeq - 1] ? 10.f : 0.f);
             int knobIndexB = seq.isValueSingleMode() ? seq.currentValueIndexA : (8 + seq.currentValueIndexB);
-            float cvB = knobValues[outSeq][knobIndexB] / 127.f * 5.f;
+            float cvB = knobToVoltage(knobValues[outSeq][knobIndexB], seq.voltageRangeB, seq.bipolarB);
             outputs[SEQ_CV_B_OUTPUT].setVoltage(cvB);
         } else {
             outputs[SEQ_TRIG_A_OUTPUT].setVoltage(0.f);
@@ -517,22 +530,33 @@ struct Core : Module {
         Sequencer& seq = sequencers[seqIndex];
 
         // B disabled if length is 0
-        if (seq.stepLengthB <= 0) return;
+        if (seq.stepLengthB <= 0) {
+            INFO("SeqB[%d]: stepLengthB=0, skipping", seqIndex);
+            return;
+        }
 
         // Advance step B
         seq.currentStepB = (seq.currentStepB + 1) % seq.stepLengthB;
 
         // Check if step is active (bottom row buttons = steps 8-15)
-        if (!seq.steps[8 + seq.currentStepB]) return;
+        if (!seq.steps[8 + seq.currentStepB]) {
+            INFO("SeqB[%d]: step %d inactive, skipping", seqIndex, seq.currentStepB);
+            return;
+        }
 
         // Apply probability
-        if (random::uniform() >= seq.probB) return;
+        float probRoll = random::uniform();
+        if (probRoll >= seq.probB) {
+            INFO("SeqB[%d]: prob failed (roll=%.2f >= probB=%.2f)", seqIndex, probRoll, seq.probB);
+            return;
+        }
 
         // Check for competition with A
         bool aWantsToFire = seq.steps[seq.currentStepA % seq.stepLengthA];
         bool bWantsToFire = true;
 
         bool bWins = !resolveCompetition(seq, aWantsToFire, bWantsToFire, false);
+        INFO("SeqB[%d]: aWants=%d, compMode=%d, bWins=%d", seqIndex, aWantsToFire, seq.competitionMode, bWins);
 
         if (bWins) {
             // B fires - advance value index
@@ -541,6 +565,9 @@ struct Core : Module {
             }
             trigPulseB[seqIndex].trigger(1e-3f);
             seqTriggeredBThisFrame[seqIndex] = true;
+            INFO("SeqB[%d]: FIRED, valueIdx=%d", seqIndex, seq.currentValueIndexB);
+        } else {
+            INFO("SeqB[%d]: lost competition to A", seqIndex);
         }
     }
 
@@ -554,8 +581,8 @@ struct Core : Module {
         // Both want to fire - competition!
         switch (seq.competitionMode) {
             case COMP_INDEPENDENT:
-                // Both can fire
-                return true;  // A always wins in independent mode
+                // Both can fire - let each win on their own clock
+                return isAClock;  // A wins on A's clock, B wins on B's clock
 
             case COMP_STEAL:
                 // Bernoulli decides
@@ -619,7 +646,6 @@ struct Core : Module {
     // Update LED display for current sequencer
     void updateSequencerLEDs() {
         if (currentLayout <= 0) return;
-        INFO("LaunchControl: updateSequencerLEDs() called");
 
         Sequencer& seq = sequencers[currentLayout - 1];
 
@@ -824,6 +850,12 @@ struct Core : Module {
             dst.isValueSingleMode = src.isValueSingleMode();
             dst.isStepSingleMode = src.isStepSingleMode();
 
+            // Voltage settings
+            dst.voltageRangeA = src.voltageRangeA;
+            dst.voltageRangeB = src.voltageRangeB;
+            dst.bipolarA = src.bipolarA;
+            dst.bipolarB = src.bipolarB;
+
             // Legacy fields for compatibility
             dst.loopStart = 0;
             dst.loopEnd = src.stepLengthA - 1;
@@ -833,18 +865,16 @@ struct Core : Module {
             dst.valueEnd = src.valueLengthA - 1;
             dst.triggered = seqTriggeredAThisFrame[s];
         }
+
+        // Copy last change info
+        expanderMessage.lastChange = lastChange;
     }
 
     void initializeDevice() {
-        INFO("LaunchControl: initializeDevice() called");
-
         // Check if MIDI output is connected
         if (midiOutput.getDeviceId() < 0) {
-            INFO("LaunchControl: No MIDI output device selected!");
             return;
         }
-
-        INFO("LaunchControl: MIDI output device ID = %d", midiOutput.getDeviceId());
 
         // First, force the Launch Control XL to template 8 (Factory Template 1)
         sendForceTemplate(8);
@@ -853,13 +883,10 @@ struct Core : Module {
         takenOver = true;
         // Update LEDs with our state
         updateAllLEDs();
-        INFO("LaunchControl: initializeDevice() complete");
     }
 
     void performTakeover() {
-        INFO("LaunchControl: performTakeover() called");
         initializeDevice();
-        INFO("LaunchControl: performTakeover() complete");
     }
 
     void sendForceTemplate(uint8_t templateNum) {
@@ -873,7 +900,6 @@ struct Core : Module {
             templateNum,
             0xF7
         };
-        INFO("LaunchControl: Sending force template SysEx, %zu bytes", msg.bytes.size());
         midiOutput.sendMessage(msg);
     }
 
@@ -881,11 +907,8 @@ struct Core : Module {
         int channel = msg.getChannel();
         int status = msg.getStatus();
 
-        // Uncomment for debugging: INFO("LaunchControl MIDI IN: status=%x channel=%d note=%d value=%d", status, channel, msg.getNote(), msg.getValue());
-
         // Only process messages on our expected channel
         if (channel != LCXL::MIDI_CHANNEL) {
-            // Don't log ignored messages to avoid spam
             return;
         }
 
@@ -940,14 +963,11 @@ struct Core : Module {
         // In sequencer mode, bottom row knobs (16-23) are parameters - bypass soft takeover
         bool isParameterKnob = (currentLayout > 0 && knobIndex >= 16);
 
-        INFO("KNOB: idx=%d val=%d isParam=%d", knobIndex, value, isParameterKnob ? 1 : 0);
-
         if (isParameterKnob) {
             // Parameter knobs work immediately without soft takeover
             knobValues[currentLayout][knobIndex] = value;
             knobPickedUp[knobIndex] = true;
             int paramIdx = knobIndex - 16;
-            INFO("PARAM: paramIdx=%d", paramIdx);
             processSequencerParameter(paramIdx, value);
         } else {
             // Soft takeover logic for value knobs
@@ -991,7 +1011,7 @@ struct Core : Module {
                     seq.currentValueIndexA = 0;
                 }
                 lengthChangeTime[0] = currentTime;  // Record time for amber display
-                INFO("SET: valLenA=%d valMode=%s", seq.valueLengthA, seq.isValueSingleMode() ? "SINGLE" : "DUAL");
+                recordChange(CHANGE_VALUE_LENGTH_A, currentLayout, seq.valueLengthA);
                 updateSequencerLEDs();
                 break;
 
@@ -1001,7 +1021,7 @@ struct Core : Module {
                     seq.currentValueIndexB = 0;
                 }
                 lengthChangeTime[1] = currentTime;  // Record time for amber display
-                INFO("SET: valLenB=%d valMode=%s", seq.valueLengthB, seq.isValueSingleMode() ? "SINGLE" : "DUAL");
+                recordChange(CHANGE_VALUE_LENGTH_B, currentLayout, seq.valueLengthB);
                 updateSequencerLEDs();
                 break;
 
@@ -1011,8 +1031,8 @@ struct Core : Module {
                     seq.currentStepA = 0;
                 }
                 lengthChangeTime[2] = currentTime;  // Record time for amber display
+                recordChange(CHANGE_STEP_LENGTH_A, currentLayout, seq.stepLengthA);
                 updateSequencerLEDs();
-                INFO("LaunchControl: Seq %d stepLengthA = %d", currentLayout, seq.stepLengthA);
                 break;
 
             case 3:  // Step Length B (0-8)
@@ -1021,23 +1041,23 @@ struct Core : Module {
                     seq.currentStepB = 0;
                 }
                 lengthChangeTime[3] = currentTime;  // Record time for amber display
+                recordChange(CHANGE_STEP_LENGTH_B, currentLayout, seq.stepLengthB);
                 updateSequencerLEDs();
-                INFO("LaunchControl: Seq %d stepLengthB = %d", currentLayout, seq.stepLengthB);
                 break;
 
             case 4:  // Probability A (0-100%)
                 seq.probA = value / 127.f;
-                INFO("LaunchControl: Seq %d probA = %.2f", currentLayout, seq.probA);
+                recordChange(CHANGE_PROB_A, currentLayout, value * 100 / 127);
                 break;
 
             case 5:  // Probability B (0-100%)
                 seq.probB = value / 127.f;
-                INFO("LaunchControl: Seq %d probB = %.2f", currentLayout, seq.probB);
+                recordChange(CHANGE_PROB_B, currentLayout, value * 100 / 127);
                 break;
 
             case 6:  // Bias/Amount (0-100%)
                 seq.bias = value / 127.f;
-                INFO("LaunchControl: Seq %d bias = %.2f", currentLayout, seq.bias);
+                recordChange(CHANGE_BIAS, currentLayout, value * 100 / 127);
                 break;
 
             case 7:  // Reserved
@@ -1046,8 +1066,6 @@ struct Core : Module {
     }
 
     void processNoteOn(int note, int velocity) {
-        INFO("LaunchControl: Note ON - note=%d velocity=%d", note, velocity);
-
         if (velocity == 0) {
             processNoteOff(note);
             return;
@@ -1055,7 +1073,6 @@ struct Core : Module {
 
         // Check for Device button
         if (note == LCXL::BTN_DEVICE) {
-            INFO("LaunchControl: Device button HELD");
             deviceButtonHeld = true;
             showLayoutSelectionLEDs();
             return;
@@ -1063,7 +1080,6 @@ struct Core : Module {
 
         // Check for Record Arm button
         if (note == LCXL::BTN_REC_ARM) {
-            INFO("LaunchControl: Record Arm button HELD");
             recArmHeld = true;
             // Show current mode on LEDs
             if (currentLayout > 0) {
@@ -1072,20 +1088,52 @@ struct Core : Module {
             return;
         }
 
-        // If Record Arm is held in sequencer mode, select routing/competition mode
-        // Based on step mode (single=routing, dual=competition)
+        // If Record Arm is held in sequencer mode, handle voltage/bipolar settings and mode selection
         if (recArmHeld && currentLayout > 0) {
-            for (int i = 0; i < 8; i++) {
-                if (note == LCXL::TRACK_FOCUS[i]) {
-                    Sequencer& seq = sequencers[currentLayout - 1];
+            Sequencer& seq = sequencers[currentLayout - 1];
+
+            // Button 1 (index 0): Cycle voltage range A (green=5V, amber=10V, red=1V)
+            if (note == LCXL::TRACK_FOCUS[0]) {
+                seq.voltageRangeA = (seq.voltageRangeA + 1) % 3;
+                recordChange(CHANGE_VOLTAGE_A, currentLayout, seq.voltageRangeA);
+                showModeSelectionLEDs();
+                return;
+            }
+            // Button 2 (index 1): Toggle bipolar A
+            if (note == LCXL::TRACK_FOCUS[1]) {
+                seq.bipolarA = !seq.bipolarA;
+                recordChange(CHANGE_BIPOLAR_A, currentLayout, seq.bipolarA ? 1 : 0);
+                showModeSelectionLEDs();
+                return;
+            }
+            // Button 5 (index 4): Cycle voltage range B
+            if (note == LCXL::TRACK_FOCUS[4]) {
+                seq.voltageRangeB = (seq.voltageRangeB + 1) % 3;
+                recordChange(CHANGE_VOLTAGE_B, currentLayout, seq.voltageRangeB);
+                showModeSelectionLEDs();
+                return;
+            }
+            // Button 6 (index 5): Toggle bipolar B
+            if (note == LCXL::TRACK_FOCUS[5]) {
+                seq.bipolarB = !seq.bipolarB;
+                recordChange(CHANGE_BIPOLAR_B, currentLayout, seq.bipolarB ? 1 : 0);
+                showModeSelectionLEDs();
+                return;
+            }
+
+            // Buttons 3, 4, 7, 8 (indices 2, 3, 6, 7): Mode selection
+            // Map to modes 0-3 for competition/routing
+            int modeButtons[] = {2, 3, 6, 7};
+            for (int m = 0; m < 4; m++) {
+                if (note == LCXL::TRACK_FOCUS[modeButtons[m]]) {
                     if (seq.isStepSingleMode()) {
-                        seq.routingMode = i;
-                        INFO("LaunchControl: Seq %d routing mode = %d", currentLayout, i);
+                        seq.routingMode = m;
+                        recordChange(CHANGE_ROUTE_MODE, currentLayout, m);
                     } else {
-                        seq.competitionMode = i;
-                        INFO("LaunchControl: Seq %d competition mode = %d", currentLayout, i);
+                        seq.competitionMode = m;
+                        recordChange(CHANGE_COMP_MODE, currentLayout, m);
                     }
-                    showModeSelectionLEDs();  // Update LED feedback
+                    showModeSelectionLEDs();
                     return;
                 }
             }
@@ -1093,10 +1141,8 @@ struct Core : Module {
 
         // If Device is held, check for layout switching and utilities
         if (deviceButtonHeld) {
-            INFO("LaunchControl: Device held, checking for layout switch...");
             // Track Focus 1 = return to default
             if (note == LCXL::TRACK_FOCUS[0]) {
-                INFO("LaunchControl: Switching to default layout");
                 switchLayout(0);
                 return;
             }
@@ -1114,7 +1160,6 @@ struct Core : Module {
             // Track Control 1-8 = enter sequencer 1-8
             for (int i = 0; i < 8; i++) {
                 if (note == LCXL::TRACK_CONTROL[i]) {
-                    INFO("LaunchControl: Switching to sequencer %d", i + 1);
                     switchLayout(i + 1);
                     return;
                 }
@@ -1135,12 +1180,30 @@ struct Core : Module {
         if (currentLayout <= 0) return;
         Sequencer& seq = sequencers[currentLayout - 1];
 
-        // Show current mode on Track Focus buttons (based on step mode)
+        // Button 0: Voltage range A (green=5V, amber=10V, red=1V)
+        uint8_t voltColorA = (seq.voltageRangeA == 0) ? LCXL::LED_GREEN_FULL :
+                             (seq.voltageRangeA == 1) ? LCXL::LED_AMBER_FULL : LCXL::LED_RED_FULL;
+        sendButtonLEDSysEx(0, voltColorA);
+
+        // Button 1: Bipolar A (green=unipolar, red=bipolar)
+        sendButtonLEDSysEx(1, seq.bipolarA ? LCXL::LED_RED_FULL : LCXL::LED_GREEN_FULL);
+
+        // Button 4: Voltage range B
+        uint8_t voltColorB = (seq.voltageRangeB == 0) ? LCXL::LED_GREEN_FULL :
+                             (seq.voltageRangeB == 1) ? LCXL::LED_AMBER_FULL : LCXL::LED_RED_FULL;
+        sendButtonLEDSysEx(4, voltColorB);
+
+        // Button 5: Bipolar B
+        sendButtonLEDSysEx(5, seq.bipolarB ? LCXL::LED_RED_FULL : LCXL::LED_GREEN_FULL);
+
+        // Buttons 2, 3, 6, 7: Mode selection (maps to modes 0-3)
         int currentMode = seq.isStepSingleMode() ? seq.routingMode : seq.competitionMode;
-        for (int i = 0; i < 8; i++) {
-            uint8_t color = (i == currentMode) ? LCXL::LED_GREEN_FULL : LCXL::LED_OFF;
-            sendButtonLEDSysEx(i, color);
+        int modeButtons[] = {2, 3, 6, 7};
+        for (int m = 0; m < 4; m++) {
+            uint8_t color = (m == currentMode) ? LCXL::LED_GREEN_FULL : LCXL::LED_OFF;
+            sendButtonLEDSysEx(modeButtons[m], color);
         }
+
         // Clear bottom row (Track Control buttons)
         for (int i = 8; i < 16; i++) {
             sendButtonLEDSysEx(i, LCXL::LED_OFF);
@@ -1171,7 +1234,6 @@ struct Core : Module {
         switch (utilityIndex) {
             case 1:  // Copy current sequencer
                 copyBuffer = seq;
-                INFO("LaunchControl: Copied sequencer %d", currentLayout);
                 break;
 
             case 2:  // Paste to current sequencer
@@ -1179,7 +1241,6 @@ struct Core : Module {
                 for (int i = 0; i < 16; i++) {
                     seq.steps[i] = copyBuffer.steps[i];
                 }
-                INFO("LaunchControl: Pasted to sequencer %d", currentLayout);
                 updateSequencerLEDs();
                 break;
 
@@ -1187,7 +1248,6 @@ struct Core : Module {
                 for (int i = 0; i < 16; i++) {
                     seq.steps[i] = false;
                 }
-                INFO("LaunchControl: Cleared sequencer %d", currentLayout);
                 updateSequencerLEDs();
                 break;
 
@@ -1195,7 +1255,6 @@ struct Core : Module {
                 for (int i = 0; i < 16; i++) {
                     seq.steps[i] = random::uniform() > 0.5f;
                 }
-                INFO("LaunchControl: Randomized steps in sequencer %d", currentLayout);
                 updateSequencerLEDs();
                 break;
 
@@ -1203,7 +1262,6 @@ struct Core : Module {
                 for (int i = 0; i < 16; i++) {
                     knobValues[currentLayout][i] = static_cast<int>(random::uniform() * 127);
                 }
-                INFO("LaunchControl: Randomized values in sequencer %d", currentLayout);
                 updateSequencerLEDs();
                 break;
 
@@ -1211,7 +1269,6 @@ struct Core : Module {
                 for (int i = 0; i < 16; i++) {
                     seq.steps[i] = !seq.steps[i];
                 }
-                INFO("LaunchControl: Inverted steps in sequencer %d", currentLayout);
                 updateSequencerLEDs();
                 break;
 
@@ -1221,7 +1278,6 @@ struct Core : Module {
                 seq.currentValueIndexA = 0;
                 seq.currentValueIndexB = 0;
                 seq.alternateCounter = 0;
-                INFO("LaunchControl: Reset playheads in sequencer %d", currentLayout);
                 updateSequencerLEDs();
                 break;
         }
@@ -1230,10 +1286,27 @@ struct Core : Module {
     // Copy buffer for sequencer copy/paste
     Sequencer copyBuffer;
 
+    // Convert knob value (0-127) to voltage based on range and bipolar settings
+    // Range: 0=5V, 1=10V, 2=1V
+    // Bipolar: false=unipolar (0 to max), true=bipolar (-max/2 to +max/2)
+    float knobToVoltage(int knobValue, int voltageRange, bool bipolar) {
+        float normalized = knobValue / 127.f;  // 0.0 to 1.0
+        float maxVoltage;
+        switch (voltageRange) {
+            case 0: maxVoltage = 5.f; break;   // Green: 5V
+            case 1: maxVoltage = 10.f; break;  // Amber: 10V
+            case 2: maxVoltage = 1.f; break;   // Red: 1V
+            default: maxVoltage = 5.f; break;
+        }
+        if (bipolar) {
+            return normalized * maxVoltage - (maxVoltage / 2.f);  // -max/2 to +max/2
+        } else {
+            return normalized * maxVoltage;  // 0 to max
+        }
+    }
+
     void processNoteOff(int note) {
-        INFO("LaunchControl: Note OFF - note=%d", note);
         if (note == LCXL::BTN_DEVICE) {
-            INFO("LaunchControl: Device button RELEASED");
             deviceButtonHeld = false;
             // Restore normal LEDs when releasing Device
             updateAllLEDs();
@@ -1288,7 +1361,7 @@ struct Core : Module {
 
         // Toggle step on/off
         seq.steps[stepIndex] = !seq.steps[stepIndex];
-        INFO("LaunchControl: Toggled step %d", stepIndex);
+        recordChange(CHANGE_STEP_TOGGLE, currentLayout, seq.steps[stepIndex] ? 1 : 0, stepIndex);
 
         // Update LED for this step
         if (seq.isStepSingleMode()) {
@@ -1301,12 +1374,11 @@ struct Core : Module {
 
     void switchLayout(int newLayout) {
         if (newLayout == currentLayout) {
-            INFO("LaunchControl: Already in layout %d, ignoring", newLayout);
             return;
         }
 
-        INFO("LaunchControl: Switching from layout %d to %d", currentLayout, newLayout);
         currentLayout = newLayout;
+        recordChange(CHANGE_LAYOUT, newLayout, newLayout);
 
         // Reset pickup state for all knobs
         for (int i = 0; i < 24; i++) {
@@ -1319,7 +1391,6 @@ struct Core : Module {
         } else {
             updateAllLEDs();
         }
-        INFO("LaunchControl: Layout switch complete, LEDs updated");
     }
 
     void updateKnobLED(int knobIndex) {
@@ -1347,7 +1418,6 @@ struct Core : Module {
     }
 
     void updateAllLEDs() {
-        INFO("LaunchControl: updateAllLEDs() called, layout=%d", currentLayout);
         // Update knob LEDs based on current layout
         if (currentLayout == 0) {
             // Default mode: all knobs use standard soft-takeover coloring
@@ -1407,7 +1477,6 @@ struct Core : Module {
     void sendResetLEDs() {
         // Reset command: B8 00 00 (176+8, 0, 0)
         // This clears all LEDs on template 8 (Factory Template 1)
-        INFO("LaunchControl: Sending reset LEDs (B8 00 00)");
         midi::Message msg;
         msg.bytes = {0xB8, 0x00, 0x00};  // CC channel 9, CC 0, value 0
         midiOutput.sendMessage(msg);
@@ -1475,6 +1544,12 @@ struct Core : Module {
             // Save modes
             json_object_set_new(seqJ, "competitionMode", json_integer(sequencers[s].competitionMode));
             json_object_set_new(seqJ, "routingMode", json_integer(sequencers[s].routingMode));
+
+            // Save voltage settings
+            json_object_set_new(seqJ, "voltageRangeA", json_integer(sequencers[s].voltageRangeA));
+            json_object_set_new(seqJ, "voltageRangeB", json_integer(sequencers[s].voltageRangeB));
+            json_object_set_new(seqJ, "bipolarA", json_boolean(sequencers[s].bipolarA));
+            json_object_set_new(seqJ, "bipolarB", json_boolean(sequencers[s].bipolarB));
 
             json_array_append_new(seqsJ, seqJ);
         }
@@ -1567,6 +1642,16 @@ struct Core : Module {
                     if (compMode) sequencers[s].competitionMode = json_integer_value(compMode);
                     json_t* routMode = json_object_get(seqJ, "routingMode");
                     if (routMode) sequencers[s].routingMode = json_integer_value(routMode);
+
+                    // Load voltage settings
+                    json_t* vrA = json_object_get(seqJ, "voltageRangeA");
+                    if (vrA) sequencers[s].voltageRangeA = json_integer_value(vrA);
+                    json_t* vrB = json_object_get(seqJ, "voltageRangeB");
+                    if (vrB) sequencers[s].voltageRangeB = json_integer_value(vrB);
+                    json_t* bpA = json_object_get(seqJ, "bipolarA");
+                    if (bpA) sequencers[s].bipolarA = json_boolean_value(bpA);
+                    json_t* bpB = json_object_get(seqJ, "bipolarB");
+                    if (bpB) sequencers[s].bipolarB = json_boolean_value(bpB);
                 }
             }
         }

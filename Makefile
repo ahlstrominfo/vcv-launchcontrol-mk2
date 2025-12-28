@@ -8,6 +8,8 @@ SOURCES += src/KnobExpander.cpp
 SOURCES += src/GateExpander.cpp
 SOURCES += src/SeqExpander.cpp
 SOURCES += src/ClockExpander.cpp
+SOURCES += src/StepDisplay.cpp
+SOURCES += src/InfoDisplay.cpp
 
 # Add resources to distribution
 DISTRIBUTABLES += res

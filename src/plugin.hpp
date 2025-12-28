@@ -12,3 +12,5 @@ extern Model* modelKnobExpander;
 extern Model* modelGateExpander;
 extern Model* modelSeqExpander;
 extern Model* modelClockExpander;
+extern Model* modelStepDisplay;
+extern Model* modelInfoDisplay;

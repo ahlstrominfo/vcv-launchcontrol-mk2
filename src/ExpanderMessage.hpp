@@ -10,6 +10,36 @@ struct ClockExpanderMessage {
     int64_t moduleId = -1;
 };
 
+// Types of changes that can be displayed
+enum ChangeType {
+    CHANGE_NONE = 0,
+    CHANGE_LAYOUT,           // Switched to layout/sequencer
+    CHANGE_VALUE_LENGTH_A,
+    CHANGE_VALUE_LENGTH_B,
+    CHANGE_STEP_LENGTH_A,
+    CHANGE_STEP_LENGTH_B,
+    CHANGE_PROB_A,
+    CHANGE_PROB_B,
+    CHANGE_BIAS,
+    CHANGE_VOLTAGE_A,
+    CHANGE_VOLTAGE_B,
+    CHANGE_BIPOLAR_A,
+    CHANGE_BIPOLAR_B,
+    CHANGE_COMP_MODE,
+    CHANGE_ROUTE_MODE,
+    CHANGE_STEP_TOGGLE,
+    CHANGE_UTILITY
+};
+
+// Info about the most recent change
+struct LastChangeInfo {
+    ChangeType type = CHANGE_NONE;
+    int sequencer = 0;      // 0 = default layout, 1-8 = sequencer
+    int value = 0;          // The new value
+    int step = 0;           // For step toggles, which step
+    float timestamp = 0.f;  // When the change happened
+};
+
 // Expander message structure for sharing data from Core module
 struct LCXLExpanderMessage {
     // Knob values (all 9 layouts x 24 knobs)
@@ -46,6 +76,12 @@ struct LCXLExpanderMessage {
         bool isValueSingleMode = false;  // true = all 16 values for A
         bool isStepSingleMode = false;   // true = all 16 steps for A
 
+        // Voltage settings (0=5V, 1=10V, 2=1V)
+        int voltageRangeA = 0;
+        int voltageRangeB = 0;
+        bool bipolarA = false;
+        bool bipolarB = false;
+
         // Legacy fields for compatibility
         int loopStart = 0;
         int loopEnd = 15;
@@ -56,6 +92,9 @@ struct LCXLExpanderMessage {
         bool triggered = false;
     };
     SequencerData sequencers[8];
+
+    // Last change info for InfoDisplay
+    LastChangeInfo lastChange;
 
     // Module ID for validation
     int64_t moduleId = -1;

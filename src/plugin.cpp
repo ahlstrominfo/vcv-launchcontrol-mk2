@@ -11,4 +11,6 @@ void init(Plugin* p) {
     p->addModel(modelGateExpander);
     p->addModel(modelSeqExpander);
     p->addModel(modelClockExpander);
+    p->addModel(modelStepDisplay);
+    p->addModel(modelInfoDisplay);
 }

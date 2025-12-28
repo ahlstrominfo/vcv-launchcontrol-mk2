@@ -42,6 +42,18 @@
       "name": "Clock Expander",
       "description": "Provides per-sequencer clock inputs (place on LEFT of Core)",
       "tags": ["Expander", "Clock"]
+    },
+    {
+      "slug": "StepDisplay",
+      "name": "Step Display",
+      "description": "Visual display of all 8 sequencers' step states",
+      "tags": ["Expander", "Visual"]
+    },
+    {
+      "slug": "InfoDisplay",
+      "name": "Info Display",
+      "description": "Shows the most recent parameter change",
+      "tags": ["Expander", "Visual"]
     }
   ]
 }

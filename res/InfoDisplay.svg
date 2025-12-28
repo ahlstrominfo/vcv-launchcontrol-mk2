@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="30.48mm" height="128.5mm" viewBox="0 0 30.48 128.5">
+  <!-- Panel background -->
+  <rect width="30.48" height="128.5" fill="#1a1a1a"/>
+
+  <!-- Top accent stripe -->
+  <rect x="0" y="0" width="30.48" height="3" fill="#e74c3c"/>
+
+  <!-- Panel border -->
+  <rect x="0.3" y="0.3" width="29.88" height="127.9" fill="none" stroke="#333333" stroke-width="0.6"/>
+
+  <!-- Bottom accent -->
+  <rect x="5" y="118" width="20.48" height="0.5" fill="#444444"/>
+
+  <!-- Title -->
+  <text x="15.24" y="46" font-family="sans-serif" font-size="3" fill="#666666" text-anchor="middle">LAST CHANGE</text>
+</svg>
