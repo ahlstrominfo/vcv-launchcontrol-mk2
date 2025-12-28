@@ -1,0 +1,23 @@
+{
+  "slug": "LaunchControlXL",
+  "name": "LaunchControl XL",
+  "version": "2.0.0",
+  "license": "GPL-3.0-or-later",
+  "brand": "LaunchControl",
+  "author": "ahlstrominfo",
+  "authorEmail": "",
+  "authorUrl": "",
+  "pluginUrl": "",
+  "manualUrl": "",
+  "sourceUrl": "https://github.com/ahlstrominfo/vcv-launchcontrol",
+  "donateUrl": "",
+  "changelogUrl": "",
+  "modules": [
+    {
+      "slug": "Core",
+      "name": "LaunchControl Core",
+      "description": "Main controller for Novation Launch Control XL MK2",
+      "tags": ["Controller", "MIDI", "Hardware clone"]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="40.64mm" height="128.5mm" viewBox="0 0 40.64 128.5">
+  <!-- Panel background -->
+  <rect width="40.64" height="128.5" fill="#2a2a2a"/>
+
+  <!-- Panel border -->
+  <rect x="0.5" y="0.5" width="39.64" height="127.5" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+
+  <!-- Title -->
+  <text x="20.32" y="10" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" fill="#ffffff" font-weight="bold">LCXL</text>
+  <text x="20.32" y="14" text-anchor="middle" font-family="Arial, sans-serif" font-size="2.5" fill="#aaaaaa">Core</text>
+
+  <!-- Connected indicator label -->
+  <text x="7" y="22" text-anchor="middle" font-family="Arial, sans-serif" font-size="1.5" fill="#888888">MIDI</text>
+
+  <!-- Takeover button label -->
+  <text x="20" y="28" text-anchor="middle" font-family="Arial, sans-serif" font-size="1.5" fill="#888888">TAKE</text>
+  <text x="27" y="19" text-anchor="middle" font-family="Arial, sans-serif" font-size="1.2" fill="#666666">ON</text>
+
+  <!-- Fader output labels -->
+  <text x="3" y="35" font-family="Arial, sans-serif" font-size="2" fill="#888888">F1</text>
+  <text x="3" y="45" font-family="Arial, sans-serif" font-size="2" fill="#888888">F2</text>
+  <text x="3" y="55" font-family="Arial, sans-serif" font-size="2" fill="#888888">F3</text>
+  <text x="3" y="65" font-family="Arial, sans-serif" font-size="2" fill="#888888">F4</text>
+  <text x="3" y="75" font-family="Arial, sans-serif" font-size="2" fill="#888888">F5</text>
+  <text x="3" y="85" font-family="Arial, sans-serif" font-size="2" fill="#888888">F6</text>
+  <text x="3" y="95" font-family="Arial, sans-serif" font-size="2" fill="#888888">F7</text>
+  <text x="3" y="105" font-family="Arial, sans-serif" font-size="2" fill="#888888">F8</text>
+
+  <!-- Section label -->
+  <text x="20.32" y="115" text-anchor="middle" font-family="Arial, sans-serif" font-size="1.8" fill="#666666">FADERS</text>
+
+  <!-- Brand -->
+  <text x="20.32" y="124" text-anchor="middle" font-family="Arial, sans-serif" font-size="1.5" fill="#555555">LaunchControl</text>
+</svg>

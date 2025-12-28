@@ -1,0 +1,16 @@
+# Build artifacts
+build/
+dist/
+plugin.dylib
+*.vcvplugin
+
+# Rack SDK (downloaded separately)
+Rack-SDK/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
