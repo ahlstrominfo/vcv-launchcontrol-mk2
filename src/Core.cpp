@@ -28,7 +28,7 @@ namespace LCXL {
     constexpr int BTN_SOLO = 107;
     constexpr int BTN_REC_ARM = 108;
 
-    // LED color values
+    // LED color values (bits 0-1: red 0-3, bits 4-5: green 0-3, base 12)
     constexpr uint8_t LED_OFF = 12;
     constexpr uint8_t LED_RED_LOW = 13;
     constexpr uint8_t LED_RED_FULL = 15;
@@ -36,6 +36,7 @@ namespace LCXL {
     constexpr uint8_t LED_GREEN_FULL = 60;
     constexpr uint8_t LED_AMBER_LOW = 29;
     constexpr uint8_t LED_AMBER_FULL = 63;
+    constexpr uint8_t LED_YELLOW_LOW = 30;
     constexpr uint8_t LED_YELLOW_FULL = 62;
 
     // SysEx header for Launch Control XL
@@ -602,20 +603,21 @@ struct Core : Module {
 
     void updateStepLEDSingle(int stepIndex, const Sequencer& seq) {
         bool showAmber = shouldShowAmber(2);  // stepLengthA timer
+        bool isPlayhead = (stepIndex == seq.currentStepA);
+        bool isActive = seq.steps[stepIndex];
+
         uint8_t color;
         if (stepIndex >= seq.stepLengthA) {
             color = LCXL::LED_OFF;  // Out of range
         } else if (showAmber && stepIndex == seq.stepLengthA - 1) {
-            // Boundary marker (only while adjusting) - but playhead takes priority
-            if (stepIndex == seq.currentStepA) {
-                color = LCXL::LED_RED_FULL;  // Playhead at boundary
-            } else {
-                color = LCXL::LED_AMBER_FULL;  // Boundary
-            }
-        } else if (stepIndex == seq.currentStepA) {
-            color = LCXL::LED_RED_FULL;  // Playhead
-        } else if (seq.steps[stepIndex]) {
-            color = LCXL::LED_GREEN_FULL;  // Active step
+            // Boundary marker (only while adjusting)
+            color = LCXL::LED_AMBER_FULL;
+        } else if (isPlayhead && isActive) {
+            color = LCXL::LED_GREEN_FULL;  // Playhead on active step: bright green
+        } else if (isPlayhead) {
+            color = LCXL::LED_RED_LOW;  // Playhead on inactive step: dim red
+        } else if (isActive) {
+            color = LCXL::LED_GREEN_LOW;  // Active step: dim green
         } else {
             color = LCXL::LED_OFF;  // Inactive step
         }
@@ -627,42 +629,42 @@ struct Core : Module {
         int stepLength = isSeqA ? seq.stepLengthA : seq.stepLengthB;
         int currentStep = isSeqA ? seq.currentStepA : seq.currentStepB;
         bool showAmber = shouldShowAmber(isSeqA ? 2 : 3);  // stepLengthA or stepLengthB timer
+        bool isPlayhead = (localStep == currentStep);
+        bool isActive = seq.steps[buttonIndex];
 
         uint8_t color;
         if (stepLength == 0 || localStep >= stepLength) {
             color = LCXL::LED_OFF;  // Out of range or seq B disabled
         } else if (showAmber && localStep == stepLength - 1) {
-            // Boundary marker (only while adjusting) - but playhead takes priority
-            if (localStep == currentStep) {
-                color = LCXL::LED_RED_FULL;  // Playhead at boundary
-            } else {
-                color = LCXL::LED_AMBER_FULL;  // Boundary
-            }
-        } else if (localStep == currentStep) {
-            color = LCXL::LED_RED_FULL;  // Playhead
-        } else if (seq.steps[buttonIndex]) {
-            color = LCXL::LED_GREEN_FULL;  // Active step
+            // Boundary marker (only while adjusting)
+            color = LCXL::LED_AMBER_FULL;
+        } else if (isPlayhead && isActive) {
+            color = LCXL::LED_GREEN_FULL;  // Playhead on active step: bright green
+        } else if (isPlayhead) {
+            color = LCXL::LED_RED_LOW;  // Playhead on inactive step: dim red
+        } else if (isActive) {
+            color = LCXL::LED_GREEN_LOW;  // Active step: dim green
         } else {
             color = LCXL::LED_OFF;  // Inactive step
         }
         sendButtonLEDSysEx(buttonIndex, color);
     }
 
-    // Helper to get soft takeover color for a knob
-    uint8_t getSoftTakeoverColor(int knobIndex) {
+    // Helper to get soft takeover color for a knob (bright = playhead position)
+    uint8_t getSoftTakeoverColor(int knobIndex, bool bright = false) {
         if (lastPhysicalKnobPos[knobIndex] < 0) {
-            // Unknown physical position
-            return LCXL::LED_OFF;
+            // Unknown physical position - assume picked up until we receive MIDI
+            return bright ? LCXL::LED_GREEN_FULL : LCXL::LED_GREEN_LOW;
         }
         int storedValue = knobValues[currentLayout][knobIndex];
         int physicalPos = lastPhysicalKnobPos[knobIndex];
 
         if (knobPickedUp[knobIndex] || std::abs(physicalPos - storedValue) <= 2) {
-            return LCXL::LED_GREEN_FULL;  // Picked up
+            return bright ? LCXL::LED_GREEN_FULL : LCXL::LED_GREEN_LOW;  // Picked up
         } else if (physicalPos < storedValue) {
-            return LCXL::LED_YELLOW_FULL;  // Turn right to catch up
+            return bright ? LCXL::LED_YELLOW_FULL : LCXL::LED_YELLOW_LOW;  // Turn right
         } else {
-            return LCXL::LED_RED_FULL;  // Turn left to catch up
+            return bright ? LCXL::LED_RED_FULL : LCXL::LED_RED_LOW;  // Turn left
         }
     }
 
@@ -678,6 +680,7 @@ struct Core : Module {
         bool showAmber = shouldShowAmber(0);  // valueLengthA timer
         for (int i = 0; i < 16; i++) {
             uint8_t color;
+            bool isPlayhead = (i == seq.currentValueIndexA);
 
             if (i >= seq.valueLengthA) {
                 // AFTER the length = OFF
@@ -686,8 +689,8 @@ struct Core : Module {
                 // Last active position = AMBER (only while adjusting)
                 color = LCXL::LED_AMBER_FULL;
             } else {
-                // In range = show soft takeover color
-                color = getSoftTakeoverColor(i);
+                // In range = show soft takeover color (bright if playhead)
+                color = getSoftTakeoverColor(i, isPlayhead);
             }
             sendKnobLEDSysEx(i, color);
         }
@@ -700,12 +703,13 @@ struct Core : Module {
         // Row 1: Seq A values (knobs 0-7)
         for (int i = 0; i < 8; i++) {
             uint8_t color;
+            bool isPlayhead = (i == seq.currentValueIndexA);
             if (i >= seq.valueLengthA) {
                 color = LCXL::LED_OFF;
             } else if (showAmberA && i == seq.valueLengthA - 1) {
                 color = LCXL::LED_AMBER_FULL;
             } else {
-                color = getSoftTakeoverColor(i);
+                color = getSoftTakeoverColor(i, isPlayhead);
             }
             sendKnobLEDSysEx(i, color);
         }
@@ -714,12 +718,13 @@ struct Core : Module {
         for (int i = 0; i < 8; i++) {
             int knobIndex = 8 + i;
             uint8_t color;
+            bool isPlayhead = (i == seq.currentValueIndexB);
             if (seq.valueLengthB == 0 || i >= seq.valueLengthB) {
                 color = LCXL::LED_OFF;
             } else if (showAmberB && i == seq.valueLengthB - 1) {
                 color = LCXL::LED_AMBER_FULL;
             } else {
-                color = getSoftTakeoverColor(knobIndex);
+                color = getSoftTakeoverColor(knobIndex, isPlayhead);
             }
             sendKnobLEDSysEx(knobIndex, color);
         }
