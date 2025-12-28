@@ -18,6 +18,7 @@ struct GateExpander : Module {
     };
 
     LCXLExpanderMessage leftMessages[2];
+    LCXLExpanderMessage expanderMessage;  // For forwarding to right
 
     GateExpander() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
@@ -35,12 +36,18 @@ struct GateExpander : Module {
         leftExpander.consumerMessage = &leftMessages[1];
     }
 
+    bool isValidExpander(Module* m) {
+        return m && (m->model == modelCore || m->model == modelKnobExpander ||
+                     m->model == modelGateExpander || m->model == modelSeqExpander);
+    }
+
     void process(const ProcessArgs& args) override {
         bool connected = false;
+        LCXLExpanderMessage* msg = nullptr;
 
-        // Check if connected to Core module (or another expander) on the left
-        if (leftExpander.module && leftExpander.module->model == modelCore) {
-            LCXLExpanderMessage* msg = reinterpret_cast<LCXLExpanderMessage*>(leftExpander.consumerMessage);
+        // Check if connected to Core or another expander on the left
+        if (isValidExpander(leftExpander.module)) {
+            msg = reinterpret_cast<LCXLExpanderMessage*>(leftExpander.consumerMessage);
             if (msg && msg->moduleId >= 0) {
                 connected = true;
 
@@ -48,6 +55,18 @@ struct GateExpander : Module {
                 for (int i = 0; i < 16; i++) {
                     outputs[GATE_OUTPUT + i].setVoltage(msg->buttonStates[i] ? 10.f : 0.f);
                 }
+
+                // Store for forwarding
+                expanderMessage = *msg;
+            }
+        }
+
+        // Forward message to right expander
+        if (rightExpander.module && connected) {
+            LCXLExpanderMessage* rightMsg = reinterpret_cast<LCXLExpanderMessage*>(rightExpander.module->leftExpander.producerMessage);
+            if (rightMsg) {
+                *rightMsg = expanderMessage;
+                rightExpander.module->leftExpander.messageFlipRequested = true;
             }
         }
 

@@ -182,7 +182,8 @@ struct Core : Module {
 
     // Expander message for right-side expanders
     LCXLExpanderMessage expanderMessage;
-    bool seqTriggeredThisFrame[8] = {false};  // Track which sequencers triggered
+    bool seqTriggeredAThisFrame[8] = {false};  // Track which sequencers triggered on A
+    bool seqTriggeredBThisFrame[8] = {false};  // Track which sequencers triggered on B
 
     Core() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
@@ -368,7 +369,8 @@ struct Core : Module {
 
         // Reset trigger flags for next frame
         for (int s = 0; s < 8; s++) {
-            seqTriggeredThisFrame[s] = false;
+            seqTriggeredAThisFrame[s] = false;
+            seqTriggeredBThisFrame[s] = false;
         }
     }
 
@@ -433,10 +435,11 @@ struct Core : Module {
 
         if (fireA) {
             trigPulseA[seqIndex].trigger(1e-3f);
-            seqTriggeredThisFrame[seqIndex] = true;
+            seqTriggeredAThisFrame[seqIndex] = true;
         }
         if (fireB) {
             trigPulseB[seqIndex].trigger(1e-3f);
+            seqTriggeredBThisFrame[seqIndex] = true;
         }
     }
 
@@ -463,7 +466,7 @@ struct Core : Module {
             // A fires - advance value index
             seq.currentValueIndexA = (seq.currentValueIndexA + 1) % seq.valueLengthA;
             trigPulseA[seqIndex].trigger(1e-3f);
-            seqTriggeredThisFrame[seqIndex] = true;
+            seqTriggeredAThisFrame[seqIndex] = true;
         }
     }
 
@@ -495,6 +498,7 @@ struct Core : Module {
                 seq.currentValueIndexB = (seq.currentValueIndexB + 1) % seq.valueLengthB;
             }
             trigPulseB[seqIndex].trigger(1e-3f);
+            seqTriggeredBThisFrame[seqIndex] = true;
         }
     }
 
@@ -759,13 +763,33 @@ struct Core : Module {
             for (int i = 0; i < 16; i++) {
                 dst.steps[i] = src.steps[i];
             }
-            dst.loopStart = 0;  // No longer used - kept for compatibility
+
+            // Sequence A data
+            dst.currentStepA = src.currentStepA;
+            dst.currentValueIndexA = src.currentValueIndexA;
+            dst.stepLengthA = src.stepLengthA;
+            dst.valueLengthA = src.valueLengthA;
+            dst.triggeredA = seqTriggeredAThisFrame[s];
+
+            // Sequence B data
+            dst.currentStepB = src.currentStepB;
+            dst.currentValueIndexB = src.currentValueIndexB;
+            dst.stepLengthB = src.stepLengthB;
+            dst.valueLengthB = src.valueLengthB;
+            dst.triggeredB = seqTriggeredBThisFrame[s];
+
+            // Mode flags
+            dst.isValueSingleMode = src.isValueSingleMode();
+            dst.isStepSingleMode = src.isStepSingleMode();
+
+            // Legacy fields for compatibility
+            dst.loopStart = 0;
             dst.loopEnd = src.stepLengthA - 1;
             dst.currentStep = src.currentStepA;
             dst.currentValueIndex = src.currentValueIndexA;
             dst.valueStart = 0;
             dst.valueEnd = src.valueLengthA - 1;
-            dst.triggered = seqTriggeredThisFrame[s];
+            dst.triggered = seqTriggeredAThisFrame[s];
         }
     }
 
@@ -1262,7 +1286,8 @@ struct Core : Module {
 
         uint8_t color;
         if (physicalPos < 0) {
-            color = LCXL::LED_OFF;
+            // Unknown physical position - assume picked up until we receive MIDI
+            color = LCXL::LED_GREEN_FULL;
         } else if (knobPickedUp[knobIndex] || std::abs(physicalPos - storedValue) <= 2) {
             color = LCXL::LED_GREEN_FULL;
         } else if (physicalPos < storedValue) {
@@ -1535,12 +1560,17 @@ struct CoreWidget : ModuleWidget {
         addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 53)), module, Core::SEQ_TRIG_B_OUTPUT));
         addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 62)), module, Core::SEQ_CV_B_OUTPUT));
 
-        // Fader outputs (bottom section)
-        float yStart = 75.0f;
-        float ySpacing = 7.0f;
-        for (int i = 0; i < 8; i++) {
-            addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, yStart + i * ySpacing)), module, Core::FADER_OUTPUT_1 + i));
-        }
+        // Fader outputs (bottom section, two columns)
+        // Column 1: Faders 1-4
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, 75)), module, Core::FADER_OUTPUT_1));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, 84)), module, Core::FADER_OUTPUT_1 + 1));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, 93)), module, Core::FADER_OUTPUT_1 + 2));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, 102)), module, Core::FADER_OUTPUT_1 + 3));
+        // Column 2: Faders 5-8
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 75)), module, Core::FADER_OUTPUT_1 + 4));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 84)), module, Core::FADER_OUTPUT_1 + 5));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 93)), module, Core::FADER_OUTPUT_1 + 6));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 102)), module, Core::FADER_OUTPUT_1 + 7));
     }
 
     void appendContextMenu(Menu* menu) override {

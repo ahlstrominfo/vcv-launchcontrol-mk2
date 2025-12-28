@@ -18,6 +18,7 @@ struct KnobExpander : Module {
     };
 
     LCXLExpanderMessage leftMessages[2];
+    LCXLExpanderMessage expanderMessage;  // For forwarding to right
 
     KnobExpander() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
@@ -38,12 +39,18 @@ struct KnobExpander : Module {
         leftExpander.consumerMessage = &leftMessages[1];
     }
 
+    bool isValidExpander(Module* m) {
+        return m && (m->model == modelCore || m->model == modelKnobExpander ||
+                     m->model == modelGateExpander || m->model == modelSeqExpander);
+    }
+
     void process(const ProcessArgs& args) override {
         bool connected = false;
+        LCXLExpanderMessage* msg = nullptr;
 
-        // Check if connected to Core module on the left
-        if (leftExpander.module && leftExpander.module->model == modelCore) {
-            LCXLExpanderMessage* msg = reinterpret_cast<LCXLExpanderMessage*>(leftExpander.consumerMessage);
+        // Check if connected to Core or another expander on the left
+        if (isValidExpander(leftExpander.module)) {
+            msg = reinterpret_cast<LCXLExpanderMessage*>(leftExpander.consumerMessage);
             if (msg && msg->moduleId >= 0) {
                 connected = true;
                 int layout = msg->currentLayout;
@@ -53,6 +60,18 @@ struct KnobExpander : Module {
                     float voltage = msg->knobValues[layout][i] / 127.f * 10.f;
                     outputs[KNOB_OUTPUT + i].setVoltage(voltage);
                 }
+
+                // Store for forwarding
+                expanderMessage = *msg;
+            }
+        }
+
+        // Forward message to right expander
+        if (rightExpander.module && connected) {
+            LCXLExpanderMessage* rightMsg = reinterpret_cast<LCXLExpanderMessage*>(rightExpander.module->leftExpander.producerMessage);
+            if (rightMsg) {
+                *rightMsg = expanderMessage;
+                rightExpander.module->leftExpander.messageFlipRequested = true;
             }
         }
 

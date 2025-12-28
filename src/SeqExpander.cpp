@@ -9,8 +9,10 @@ struct SeqExpander : Module {
         INPUTS_LEN
     };
     enum OutputId {
-        ENUMS(TRIG_OUTPUT, 8),
-        ENUMS(CV_OUTPUT, 8),
+        ENUMS(TRIG_A_OUTPUT, 8),
+        ENUMS(TRIG_B_OUTPUT, 8),
+        ENUMS(CV_A_OUTPUT, 8),
+        ENUMS(CV_B_OUTPUT, 8),
         OUTPUTS_LEN
     };
     enum LightId {
@@ -19,19 +21,23 @@ struct SeqExpander : Module {
     };
 
     LCXLExpanderMessage leftMessages[2];
-    dsp::PulseGenerator triggerPulses[8];
+    LCXLExpanderMessage expanderMessage;  // For forwarding to right
+    dsp::PulseGenerator triggerPulsesA[8];
+    dsp::PulseGenerator triggerPulsesB[8];
 
     SeqExpander() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
 
         // Configure trigger outputs
         for (int i = 0; i < 8; i++) {
-            configOutput(TRIG_OUTPUT + i, string::f("Sequencer %d Trigger", i + 1));
+            configOutput(TRIG_A_OUTPUT + i, string::f("Sequencer %d Trigger A", i + 1));
+            configOutput(TRIG_B_OUTPUT + i, string::f("Sequencer %d Trigger B", i + 1));
         }
 
         // Configure CV outputs
         for (int i = 0; i < 8; i++) {
-            configOutput(CV_OUTPUT + i, string::f("Sequencer %d CV", i + 1));
+            configOutput(CV_A_OUTPUT + i, string::f("Sequencer %d CV A", i + 1));
+            configOutput(CV_B_OUTPUT + i, string::f("Sequencer %d CV B", i + 1));
         }
 
         // Setup expander message buffers
@@ -39,40 +45,73 @@ struct SeqExpander : Module {
         leftExpander.consumerMessage = &leftMessages[1];
     }
 
+    bool isValidExpander(Module* m) {
+        return m && (m->model == modelCore || m->model == modelKnobExpander ||
+                     m->model == modelGateExpander || m->model == modelSeqExpander);
+    }
+
     void process(const ProcessArgs& args) override {
         bool connected = false;
+        LCXLExpanderMessage* msg = nullptr;
 
-        // Check if connected to Core module on the left
-        if (leftExpander.module && leftExpander.module->model == modelCore) {
-            LCXLExpanderMessage* msg = reinterpret_cast<LCXLExpanderMessage*>(leftExpander.consumerMessage);
+        // Check if connected to Core or another expander on the left
+        if (isValidExpander(leftExpander.module)) {
+            msg = reinterpret_cast<LCXLExpanderMessage*>(leftExpander.consumerMessage);
             if (msg && msg->moduleId >= 0) {
                 connected = true;
 
                 for (int s = 0; s < 8; s++) {
                     auto& seq = msg->sequencers[s];
+                    int layout = s + 1;  // Sequencers use layouts 1-8
 
-                    // Fire trigger if sequencer triggered this frame
-                    if (seq.triggered) {
-                        triggerPulses[s].trigger(1e-3f);  // 1ms pulse
+                    // Fire trigger A if sequencer triggered this frame
+                    if (seq.triggeredA) {
+                        triggerPulsesA[s].trigger(1e-3f);  // 1ms pulse
                     }
 
-                    // Output trigger
-                    outputs[TRIG_OUTPUT + s].setVoltage(triggerPulses[s].process(args.sampleTime) ? 10.f : 0.f);
+                    // Fire trigger B if sequencer triggered this frame
+                    if (seq.triggeredB) {
+                        triggerPulsesB[s].trigger(1e-3f);  // 1ms pulse
+                    }
 
-                    // Output CV from value knob (0-5V at 1V/oct)
-                    int knobIndex = seq.currentValueIndex;
-                    int layout = s + 1;  // Sequencers use layouts 1-8
-                    float cv = msg->knobValues[layout][knobIndex] / 127.f * 5.f;
-                    outputs[CV_OUTPUT + s].setVoltage(cv);
+                    // Output triggers
+                    outputs[TRIG_A_OUTPUT + s].setVoltage(triggerPulsesA[s].process(args.sampleTime) ? 10.f : 0.f);
+                    outputs[TRIG_B_OUTPUT + s].setVoltage(triggerPulsesB[s].process(args.sampleTime) ? 10.f : 0.f);
+
+                    // Output CV A from value knob (0-5V at 1V/oct)
+                    // In single mode, use full range; in dual mode, use first 8 knobs
+                    int knobIndexA = seq.currentValueIndexA;
+                    float cvA = msg->knobValues[layout][knobIndexA] / 127.f * 5.f;
+                    outputs[CV_A_OUTPUT + s].setVoltage(cvA);
+
+                    // Output CV B from value knob (0-5V at 1V/oct)
+                    // In single mode, same as A; in dual mode, use knobs 8-15
+                    int knobIndexB = seq.isValueSingleMode ? seq.currentValueIndexA : (8 + seq.currentValueIndexB);
+                    float cvB = msg->knobValues[layout][knobIndexB] / 127.f * 5.f;
+                    outputs[CV_B_OUTPUT + s].setVoltage(cvB);
                 }
+
+                // Store for forwarding
+                expanderMessage = *msg;
+            }
+        }
+
+        // Forward message to right expander
+        if (rightExpander.module && connected) {
+            LCXLExpanderMessage* rightMsg = reinterpret_cast<LCXLExpanderMessage*>(rightExpander.module->leftExpander.producerMessage);
+            if (rightMsg) {
+                *rightMsg = expanderMessage;
+                rightExpander.module->leftExpander.messageFlipRequested = true;
             }
         }
 
         // If not connected, output zeros
         if (!connected) {
             for (int s = 0; s < 8; s++) {
-                outputs[TRIG_OUTPUT + s].setVoltage(0.f);
-                outputs[CV_OUTPUT + s].setVoltage(0.f);
+                outputs[TRIG_A_OUTPUT + s].setVoltage(0.f);
+                outputs[TRIG_B_OUTPUT + s].setVoltage(0.f);
+                outputs[CV_A_OUTPUT + s].setVoltage(0.f);
+                outputs[CV_B_OUTPUT + s].setVoltage(0.f);
             }
         }
 
@@ -94,15 +133,25 @@ struct SeqExpanderWidget : ModuleWidget {
         // Connected light
         addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(5, 10)), module, SeqExpander::CONNECTED_LIGHT));
 
-        // Trigger outputs (8 jacks)
+        // Trigger A outputs (8 jacks) - Column 1
         float y = 20.f;
         for (int i = 0; i < 8; i++) {
-            addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.5, y + i * 10)), module, SeqExpander::TRIG_OUTPUT + i));
+            addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.5, y + i * 10)), module, SeqExpander::TRIG_A_OUTPUT + i));
         }
 
-        // CV outputs (8 jacks)
+        // Trigger B outputs (8 jacks) - Column 2
         for (int i = 0; i < 8; i++) {
-            addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(17.5, y + i * 10)), module, SeqExpander::CV_OUTPUT + i));
+            addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(17.5, y + i * 10)), module, SeqExpander::TRIG_B_OUTPUT + i));
+        }
+
+        // CV A outputs (8 jacks) - Column 3
+        for (int i = 0; i < 8; i++) {
+            addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(27.5, y + i * 10)), module, SeqExpander::CV_A_OUTPUT + i));
+        }
+
+        // CV B outputs (8 jacks) - Column 4
+        for (int i = 0; i < 8; i++) {
+            addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(37.5, y + i * 10)), module, SeqExpander::CV_B_OUTPUT + i));
         }
     }
 };

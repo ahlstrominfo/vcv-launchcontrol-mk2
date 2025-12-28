@@ -18,29 +18,34 @@
   <!-- TAKE indicator area -->
   <circle cx="27" cy="22" r="2" fill="none" stroke="#444444" stroke-width="0.3"/>
 
-  <!-- Fader output areas - decorative rings -->
+  <!-- Clock/Reset inputs (left) -->
   <circle cx="10" cy="35" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="10" cy="45" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="10" cy="55" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="10" cy="65" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="10" cy="75" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="10" cy="85" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="10" cy="95" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="10" cy="105" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="10" cy="47" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="10" cy="59" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
 
-  <!-- Number indicators (simple dots for 1-8) -->
-  <circle cx="3" cy="35" r="0.8" fill="#555555"/>
-  <circle cx="3" cy="45" r="0.8" fill="#555555"/>
-  <circle cx="3" cy="55" r="0.8" fill="#555555"/>
-  <circle cx="3" cy="65" r="0.8" fill="#555555"/>
-  <circle cx="3" cy="75" r="0.8" fill="#555555"/>
-  <circle cx="3" cy="85" r="0.8" fill="#555555"/>
-  <circle cx="3" cy="95" r="0.8" fill="#555555"/>
-  <circle cx="3" cy="105" r="0.8" fill="#555555"/>
+  <!-- Sequencer outputs (right) -->
+  <circle cx="30" cy="35" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="30" cy="44" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="30" cy="53" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="30" cy="62" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+
+  <!-- Fader outputs - Column 1 (1-4) -->
+  <circle cx="10" cy="75" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="10" cy="84" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="10" cy="93" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="10" cy="102" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+
+  <!-- Fader outputs - Column 2 (5-8) -->
+  <circle cx="30" cy="75" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="30" cy="84" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="30" cy="93" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+  <circle cx="30" cy="102" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
+
+  <!-- Section labels -->
+  <text x="10" y="30" font-size="2.5" fill="#666666" text-anchor="middle">CLK</text>
+  <text x="30" y="30" font-size="2.5" fill="#666666" text-anchor="middle">SEQ</text>
+  <text x="20" y="70" font-size="2.5" fill="#666666" text-anchor="middle">FADERS</text>
 
   <!-- Bottom accent -->
   <rect x="5" y="118" width="30.64" height="0.5" fill="#444444"/>
-
-  <!-- Logo area - simple "LC" indicator -->
-  <rect x="14" y="7" width="12" height="5" rx="1" fill="none" stroke="#e74c3c" stroke-width="0.5"/>
 </svg>

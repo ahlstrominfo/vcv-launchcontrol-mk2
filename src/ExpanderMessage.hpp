@@ -18,13 +18,33 @@ struct LCXLExpanderMessage {
     // Sequencer data for all 8 sequencers
     struct SequencerData {
         bool steps[16] = {false};
+
+        // Sequence A (uses steps 0-7 in dual, 0-15 in single)
+        int currentStepA = 0;
+        int currentValueIndexA = 0;
+        int stepLengthA = 8;
+        int valueLengthA = 8;
+        bool triggeredA = false;
+
+        // Sequence B (uses steps 8-15, only in dual mode)
+        int currentStepB = 0;
+        int currentValueIndexB = 0;
+        int stepLengthB = 4;
+        int valueLengthB = 4;
+        bool triggeredB = false;
+
+        // Mode flags
+        bool isValueSingleMode = false;  // true = all 16 values for A
+        bool isStepSingleMode = false;   // true = all 16 steps for A
+
+        // Legacy fields for compatibility
         int loopStart = 0;
         int loopEnd = 15;
         int currentStep = 0;
         int currentValueIndex = 0;
         int valueStart = 0;
         int valueEnd = 15;
-        bool triggered = false;  // True on clock when step is active
+        bool triggered = false;
     };
     SequencerData sequencers[8];
 
