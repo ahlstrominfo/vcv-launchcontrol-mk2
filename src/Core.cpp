@@ -224,8 +224,8 @@ struct Core : Module {
         // Track time for amber display timeout
         currentTime += args.sampleTime;
 
-        // Check if any amber timer just expired and needs LED update
-        if (currentLayout > 0) {
+        // Check if any amber timer just expired and needs LED update (skip if holding Device/RecArm)
+        if (currentLayout > 0 && !deviceButtonHeld && !recArmHeld) {
             for (int i = 0; i < 4; i++) {
                 if (lengthChangeTime[i] >= 0) {
                     float elapsed = currentTime - lengthChangeTime[i];
@@ -279,8 +279,8 @@ struct Core : Module {
                 sequencers[s].currentValueIndexB = 0;
                 sequencers[s].alternateCounter = 0;
             }
-            // Update LEDs if viewing a sequencer
-            if (currentLayout > 0) {
+            // Update LEDs if viewing a sequencer (skip if holding Device/RecArm for selection)
+            if (currentLayout > 0 && !deviceButtonHeld && !recArmHeld) {
                 updateSequencerLEDs();
             }
         }
@@ -313,8 +313,8 @@ struct Core : Module {
             }
         }
 
-        // Update LEDs if viewing a sequencer and clock happened
-        if (currentLayout > 0 && (clockARose || clockBRose)) {
+        // Update LEDs if viewing a sequencer and clock happened (skip if holding Device/RecArm)
+        if (currentLayout > 0 && (clockARose || clockBRose) && !deviceButtonHeld && !recArmHeld) {
             updateSequencerLEDs();
         }
 
@@ -990,6 +990,7 @@ struct Core : Module {
         if (note == LCXL::BTN_DEVICE) {
             INFO("LaunchControl: Device button HELD");
             deviceButtonHeld = true;
+            showLayoutSelectionLEDs();
             return;
         }
 
@@ -1075,6 +1076,24 @@ struct Core : Module {
         }
     }
 
+    void showLayoutSelectionLEDs() {
+        // Show current layout on Track Focus buttons
+        // Button 0 = default (layout 0), Buttons 1-7 unused in default mode
+        // Track Control 1-8 = sequencer layouts 1-8
+        for (int i = 0; i < 8; i++) {
+            uint8_t color = LCXL::LED_OFF;
+            if (currentLayout == 0 && i == 0) {
+                color = LCXL::LED_GREEN_FULL;  // Default layout selected
+            }
+            sendButtonLEDSysEx(i, color);
+        }
+        // Track Control buttons show sequencer selection
+        for (int i = 0; i < 8; i++) {
+            uint8_t color = (currentLayout == i + 1) ? LCXL::LED_GREEN_FULL : LCXL::LED_OFF;
+            sendButtonLEDSysEx(8 + i, color);
+        }
+    }
+
     void executeSequencerUtility(int utilityIndex) {
         Sequencer& seq = sequencers[currentLayout - 1];
 
@@ -1143,6 +1162,8 @@ struct Core : Module {
     void processNoteOff(int note) {
         if (note == LCXL::BTN_DEVICE) {
             deviceButtonHeld = false;
+            // Restore normal LEDs when releasing Device
+            updateAllLEDs();
             return;
         }
 
