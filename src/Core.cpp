@@ -1088,44 +1088,13 @@ struct Core : Module {
             return;
         }
 
-        // If Record Arm is held in sequencer mode, handle voltage/bipolar settings and mode selection
+        // If Record Arm is held in sequencer mode, handle mode selection and voltage/bipolar settings
         if (recArmHeld && currentLayout > 0) {
             Sequencer& seq = sequencers[currentLayout - 1];
 
-            // Button 1 (index 0): Cycle voltage range A (green=5V, amber=10V, red=1V)
-            if (note == LCXL::TRACK_FOCUS[0]) {
-                seq.voltageRangeA = (seq.voltageRangeA + 1) % 3;
-                recordChange(CHANGE_VOLTAGE_A, currentLayout, seq.voltageRangeA);
-                showModeSelectionLEDs();
-                return;
-            }
-            // Button 2 (index 1): Toggle bipolar A
-            if (note == LCXL::TRACK_FOCUS[1]) {
-                seq.bipolarA = !seq.bipolarA;
-                recordChange(CHANGE_BIPOLAR_A, currentLayout, seq.bipolarA ? 1 : 0);
-                showModeSelectionLEDs();
-                return;
-            }
-            // Button 5 (index 4): Cycle voltage range B
-            if (note == LCXL::TRACK_FOCUS[4]) {
-                seq.voltageRangeB = (seq.voltageRangeB + 1) % 3;
-                recordChange(CHANGE_VOLTAGE_B, currentLayout, seq.voltageRangeB);
-                showModeSelectionLEDs();
-                return;
-            }
-            // Button 6 (index 5): Toggle bipolar B
-            if (note == LCXL::TRACK_FOCUS[5]) {
-                seq.bipolarB = !seq.bipolarB;
-                recordChange(CHANGE_BIPOLAR_B, currentLayout, seq.bipolarB ? 1 : 0);
-                showModeSelectionLEDs();
-                return;
-            }
-
-            // Buttons 3, 4, 7, 8 (indices 2, 3, 6, 7): Mode selection
-            // Map to modes 0-3 for competition/routing
-            int modeButtons[] = {2, 3, 6, 7};
-            for (int m = 0; m < 4; m++) {
-                if (note == LCXL::TRACK_FOCUS[modeButtons[m]]) {
+            // Track Focus row (top): Mode selection (all 8 buttons for competition/routing modes)
+            for (int m = 0; m < 8; m++) {
+                if (note == LCXL::TRACK_FOCUS[m]) {
                     if (seq.isStepSingleMode()) {
                         seq.routingMode = m;
                         recordChange(CHANGE_ROUTE_MODE, currentLayout, m);
@@ -1136,6 +1105,36 @@ struct Core : Module {
                     showModeSelectionLEDs();
                     return;
                 }
+            }
+
+            // Track Control row (bottom): Voltage and polarity settings
+            // Button 1: Cycle voltage range A (green=5V, amber=10V, red=1V)
+            if (note == LCXL::TRACK_CONTROL[0]) {
+                seq.voltageRangeA = (seq.voltageRangeA + 1) % 3;
+                recordChange(CHANGE_VOLTAGE_A, currentLayout, seq.voltageRangeA);
+                showModeSelectionLEDs();
+                return;
+            }
+            // Button 2: Toggle bipolar A
+            if (note == LCXL::TRACK_CONTROL[1]) {
+                seq.bipolarA = !seq.bipolarA;
+                recordChange(CHANGE_BIPOLAR_A, currentLayout, seq.bipolarA ? 1 : 0);
+                showModeSelectionLEDs();
+                return;
+            }
+            // Button 5: Cycle voltage range B
+            if (note == LCXL::TRACK_CONTROL[4]) {
+                seq.voltageRangeB = (seq.voltageRangeB + 1) % 3;
+                recordChange(CHANGE_VOLTAGE_B, currentLayout, seq.voltageRangeB);
+                showModeSelectionLEDs();
+                return;
+            }
+            // Button 6: Toggle bipolar B
+            if (note == LCXL::TRACK_CONTROL[5]) {
+                seq.bipolarB = !seq.bipolarB;
+                recordChange(CHANGE_BIPOLAR_B, currentLayout, seq.bipolarB ? 1 : 0);
+                showModeSelectionLEDs();
+                return;
             }
         }
 
@@ -1180,34 +1179,37 @@ struct Core : Module {
         if (currentLayout <= 0) return;
         Sequencer& seq = sequencers[currentLayout - 1];
 
-        // Button 0: Voltage range A (green=5V, amber=10V, red=1V)
+        // Track Focus row (top, buttons 0-7): Mode selection (all 8 modes)
+        int currentMode = seq.isStepSingleMode() ? seq.routingMode : seq.competitionMode;
+        for (int m = 0; m < 8; m++) {
+            uint8_t color = (m == currentMode) ? LCXL::LED_GREEN_FULL : LCXL::LED_OFF;
+            sendButtonLEDSysEx(m, color);
+        }
+
+        // Track Control row (bottom, buttons 8-15): Voltage and polarity settings
+        // Button 8 (index 0): Voltage range A (green=5V, amber=10V, red=1V)
         uint8_t voltColorA = (seq.voltageRangeA == 0) ? LCXL::LED_GREEN_FULL :
                              (seq.voltageRangeA == 1) ? LCXL::LED_AMBER_FULL : LCXL::LED_RED_FULL;
-        sendButtonLEDSysEx(0, voltColorA);
+        sendButtonLEDSysEx(8, voltColorA);
 
-        // Button 1: Bipolar A (green=unipolar, red=bipolar)
-        sendButtonLEDSysEx(1, seq.bipolarA ? LCXL::LED_RED_FULL : LCXL::LED_GREEN_FULL);
+        // Button 9 (index 1): Bipolar A (green=unipolar, red=bipolar)
+        sendButtonLEDSysEx(9, seq.bipolarA ? LCXL::LED_RED_FULL : LCXL::LED_GREEN_FULL);
 
-        // Button 4: Voltage range B
+        // Buttons 10, 11: Off
+        sendButtonLEDSysEx(10, LCXL::LED_OFF);
+        sendButtonLEDSysEx(11, LCXL::LED_OFF);
+
+        // Button 12 (index 4): Voltage range B
         uint8_t voltColorB = (seq.voltageRangeB == 0) ? LCXL::LED_GREEN_FULL :
                              (seq.voltageRangeB == 1) ? LCXL::LED_AMBER_FULL : LCXL::LED_RED_FULL;
-        sendButtonLEDSysEx(4, voltColorB);
+        sendButtonLEDSysEx(12, voltColorB);
 
-        // Button 5: Bipolar B
-        sendButtonLEDSysEx(5, seq.bipolarB ? LCXL::LED_RED_FULL : LCXL::LED_GREEN_FULL);
+        // Button 13 (index 5): Bipolar B
+        sendButtonLEDSysEx(13, seq.bipolarB ? LCXL::LED_RED_FULL : LCXL::LED_GREEN_FULL);
 
-        // Buttons 2, 3, 6, 7: Mode selection (maps to modes 0-3)
-        int currentMode = seq.isStepSingleMode() ? seq.routingMode : seq.competitionMode;
-        int modeButtons[] = {2, 3, 6, 7};
-        for (int m = 0; m < 4; m++) {
-            uint8_t color = (m == currentMode) ? LCXL::LED_GREEN_FULL : LCXL::LED_OFF;
-            sendButtonLEDSysEx(modeButtons[m], color);
-        }
-
-        // Clear bottom row (Track Control buttons)
-        for (int i = 8; i < 16; i++) {
-            sendButtonLEDSysEx(i, LCXL::LED_OFF);
-        }
+        // Buttons 14, 15: Off
+        sendButtonLEDSysEx(14, LCXL::LED_OFF);
+        sendButtonLEDSysEx(15, LCXL::LED_OFF);
     }
 
     void showLayoutSelectionLEDs() {
