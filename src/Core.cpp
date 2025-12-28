@@ -573,6 +573,7 @@ struct Core : Module {
     // Update LED display for current sequencer
     void updateSequencerLEDs() {
         if (currentLayout <= 0) return;
+        INFO("LaunchControl: updateSequencerLEDs() called");
 
         Sequencer& seq = sequencers[currentLayout - 1];
 
@@ -1074,6 +1075,10 @@ struct Core : Module {
             uint8_t color = (i == currentMode) ? LCXL::LED_GREEN_FULL : LCXL::LED_OFF;
             sendButtonLEDSysEx(i, color);
         }
+        // Clear bottom row (Track Control buttons)
+        for (int i = 8; i < 16; i++) {
+            sendButtonLEDSysEx(i, LCXL::LED_OFF);
+        }
     }
 
     void showLayoutSelectionLEDs() {
@@ -1160,7 +1165,9 @@ struct Core : Module {
     Sequencer copyBuffer;
 
     void processNoteOff(int note) {
+        INFO("LaunchControl: Note OFF - note=%d", note);
         if (note == LCXL::BTN_DEVICE) {
+            INFO("LaunchControl: Device button RELEASED");
             deviceButtonHeld = false;
             // Restore normal LEDs when releasing Device
             updateAllLEDs();
@@ -1240,8 +1247,12 @@ struct Core : Module {
             knobPickedUp[i] = false;
         }
 
-        // Update all LEDs for new layout
-        updateAllLEDs();
+        // Update LEDs - but if Device is still held, show selection instead
+        if (deviceButtonHeld) {
+            showLayoutSelectionLEDs();
+        } else {
+            updateAllLEDs();
+        }
         INFO("LaunchControl: Layout switch complete, LEDs updated");
     }
 
@@ -1269,6 +1280,7 @@ struct Core : Module {
     }
 
     void updateAllLEDs() {
+        INFO("LaunchControl: updateAllLEDs() called, layout=%d", currentLayout);
         // Update knob LEDs based on current layout
         if (currentLayout == 0) {
             // Default mode: all knobs use standard soft-takeover coloring
