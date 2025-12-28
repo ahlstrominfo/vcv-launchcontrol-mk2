@@ -11,3 +11,4 @@ extern Model* modelCore;
 extern Model* modelKnobExpander;
 extern Model* modelGateExpander;
 extern Model* modelSeqExpander;
+extern Model* modelClockExpander;

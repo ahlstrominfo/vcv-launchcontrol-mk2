@@ -107,8 +107,13 @@ struct Core : Module {
     dsp::SchmittTrigger clockTriggerA;
     dsp::SchmittTrigger clockTriggerB;
     dsp::SchmittTrigger resetTrigger;
+    dsp::SchmittTrigger perSeqClockTriggerA[8];  // Per-sequencer clock A triggers
+    dsp::SchmittTrigger perSeqClockTriggerB[8];  // Per-sequencer clock B triggers
     dsp::PulseGenerator trigPulseA[8];   // Trigger A pulse for each sequencer
     dsp::PulseGenerator trigPulseB[8];   // Trigger B pulse for each sequencer
+
+    // Left expander (ClockExpander) message buffers
+    ClockExpanderMessage leftMessages[2];
 
     midi::InputQueue midiInput;
     midi::Output midiOutput;
@@ -213,6 +218,10 @@ struct Core : Module {
             knobPickedUp[i] = true;        // Start as picked up
         }
 
+        // Setup left expander message buffers (for ClockExpander)
+        leftExpander.producerMessage = &leftMessages[0];
+        leftExpander.consumerMessage = &leftMessages[1];
+
         INFO("LaunchControl: Core module created");
     }
 
@@ -225,17 +234,20 @@ struct Core : Module {
         // Track time for amber display timeout
         currentTime += args.sampleTime;
 
-        // Check if any amber timer just expired and needs LED update (skip if holding Device/RecArm)
+        // Check if any amber timer has expired and needs LED update (skip if holding Device/RecArm)
         if (currentLayout > 0 && !deviceButtonHeld && !recArmHeld) {
+            bool needsUpdate = false;
             for (int i = 0; i < 4; i++) {
                 if (lengthChangeTime[i] >= 0) {
                     float elapsed = currentTime - lengthChangeTime[i];
-                    // If timer just expired (within one frame of expiry)
-                    if (elapsed >= AMBER_DISPLAY_TIME && elapsed < AMBER_DISPLAY_TIME + args.sampleTime * 2) {
-                        updateSequencerLEDs();
-                        break;  // Only need one update
+                    if (elapsed >= AMBER_DISPLAY_TIME) {
+                        lengthChangeTime[i] = -1.f;  // Clear the expired timer
+                        needsUpdate = true;
                     }
                 }
+            }
+            if (needsUpdate) {
+                updateSequencerLEDs();
             }
         }
 
@@ -286,17 +298,47 @@ struct Core : Module {
             }
         }
 
-        // Get clock voltages (Clock B normals to Clock A)
-        float clockAVoltage = inputs[CLOCK_A_INPUT].getVoltage();
-        float clockBVoltage = inputs[CLOCK_B_INPUT].isConnected() ?
-            inputs[CLOCK_B_INPUT].getVoltage() : clockAVoltage;
+        // Check for ClockExpander on the left
+        bool hasClockExpander = false;
+        ClockExpanderMessage* clockMsg = nullptr;
+        if (leftExpander.module && leftExpander.module->model == modelClockExpander) {
+            clockMsg = reinterpret_cast<ClockExpanderMessage*>(leftExpander.consumerMessage);
+            if (clockMsg && clockMsg->moduleId >= 0) {
+                hasClockExpander = true;
+            }
+        }
 
-        bool clockARose = clockTriggerA.process(clockAVoltage);
-        bool clockBRose = clockTriggerB.process(clockBVoltage);
+        // Get default clock voltages (Clock B normals to Clock A)
+        float defaultClockAVoltage = inputs[CLOCK_A_INPUT].getVoltage();
+        float defaultClockBVoltage = inputs[CLOCK_B_INPUT].isConnected() ?
+            inputs[CLOCK_B_INPUT].getVoltage() : defaultClockAVoltage;
+
+        // Track if any clock rose (for LED updates)
+        bool anyClockARose = false;
+        bool anyClockBRose = false;
 
         // Process clock inputs for all sequencers
         for (int s = 0; s < 8; s++) {
             Sequencer& seq = sequencers[s];
+
+            // Determine clock sources for this sequencer
+            float clockAVoltage, clockBVoltage;
+            if (hasClockExpander && clockMsg->hasClockA[s]) {
+                // Use per-sequencer clocks from expander
+                clockAVoltage = clockMsg->clockA[s];
+                clockBVoltage = clockMsg->hasClockB[s] ? clockMsg->clockB[s] : clockAVoltage;
+            } else {
+                // Fall back to module's shared clock inputs
+                clockAVoltage = defaultClockAVoltage;
+                clockBVoltage = defaultClockBVoltage;
+            }
+
+            // Process triggers per-sequencer
+            bool clockARose = perSeqClockTriggerA[s].process(clockAVoltage);
+            bool clockBRose = perSeqClockTriggerB[s].process(clockBVoltage);
+
+            if (clockARose) anyClockARose = true;
+            if (clockBRose) anyClockBRose = true;
 
             if (seq.isStepSingleMode()) {
                 // Single step mode: only use Clock A
@@ -315,7 +357,7 @@ struct Core : Module {
         }
 
         // Update LEDs if viewing a sequencer and clock happened (skip if holding Device/RecArm)
-        if (currentLayout > 0 && (clockARose || clockBRose) && !deviceButtonHeld && !recArmHeld) {
+        if (currentLayout > 0 && (anyClockARose || anyClockBRose) && !deviceButtonHeld && !recArmHeld) {
             updateSequencerLEDs();
         }
 
@@ -1531,6 +1573,30 @@ struct Core : Module {
     }
 };
 
+// Simple label widget for panel text
+struct PanelLabel : widget::Widget {
+    std::string text;
+    NVGcolor color = nvgRGB(0x99, 0x99, 0x99);
+    float fontSize = 8.f;
+
+    void draw(const DrawArgs& args) override {
+        nvgFontSize(args.vg, fontSize);
+        nvgFillColor(args.vg, color);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgText(args.vg, box.size.x / 2, box.size.y / 2, text.c_str(), NULL);
+    }
+};
+
+// Helper to create labels easily
+PanelLabel* createLabel(Vec pos, Vec size, std::string text, float fontSize = 8.f) {
+    PanelLabel* label = new PanelLabel();
+    label->box.pos = pos;
+    label->box.size = size;
+    label->text = text;
+    label->fontSize = fontSize;
+    return label;
+}
+
 struct CoreWidget : ModuleWidget {
     CoreWidget(Core* module) {
         setModule(module);
@@ -1542,35 +1608,54 @@ struct CoreWidget : ModuleWidget {
         addChild(createWidget<ScrewSilver>(Vec(RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
         addChild(createWidget<ScrewSilver>(Vec(box.size.x - 2 * RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
-        // Connected light (MIDI status)
-        addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(7, 18)), module, Core::CONNECTED_LIGHT));
+        // Connected light (MIDI status) - positioned like expanders
+        addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(5, 10)), module, Core::CONNECTED_LIGHT));
 
-        // Takeover button with light
-        addParam(createParamCentered<VCVButton>(mm2px(Vec(20, 22)), module, Core::TAKEOVER_PARAM));
-        addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(27, 22)), module, Core::TAKEOVER_LIGHT));
+        // Takeover button with light - positioned near connected light
+        addParam(createParamCentered<VCVButton>(mm2px(Vec(20, 10)), module, Core::TAKEOVER_PARAM));
+        addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(35, 10)), module, Core::TAKEOVER_LIGHT));
 
-        // Clock and Reset inputs (left side)
-        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10, 35)), module, Core::CLOCK_A_INPUT));
-        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10, 47)), module, Core::CLOCK_B_INPUT));
-        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10, 59)), module, Core::RESET_INPUT));
+        // Column labels (like expanders)
+        addChild(createLabel(mm2px(Vec(0, 14)), mm2px(Vec(20, 4)), "CLK/RST", 7.f));
+        addChild(createLabel(mm2px(Vec(20, 14)), mm2px(Vec(20, 4)), "SEQ OUT", 7.f));
 
-        // Sequencer outputs (right side)
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 35)), module, Core::SEQ_TRIG_A_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 44)), module, Core::SEQ_CV_A_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 53)), module, Core::SEQ_TRIG_B_OUTPUT));
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 62)), module, Core::SEQ_CV_B_OUTPUT));
+        // Clock and Reset inputs (left column) - starting at y=22 like expanders
+        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10, 22)), module, Core::CLOCK_A_INPUT));
+        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10, 32)), module, Core::CLOCK_B_INPUT));
+        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(10, 42)), module, Core::RESET_INPUT));
+
+        // Sequencer outputs (right column) - starting at y=22 like expanders
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 22)), module, Core::SEQ_TRIG_A_OUTPUT));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 32)), module, Core::SEQ_CV_A_OUTPUT));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 42)), module, Core::SEQ_TRIG_B_OUTPUT));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 52)), module, Core::SEQ_CV_B_OUTPUT));
+
+        // Row labels for inputs/outputs
+        addChild(createLabel(mm2px(Vec(15, 20)), mm2px(Vec(10, 4)), "A", 6.f));
+        addChild(createLabel(mm2px(Vec(15, 30)), mm2px(Vec(10, 4)), "B", 6.f));
+        addChild(createLabel(mm2px(Vec(15, 40)), mm2px(Vec(10, 4)), "RST", 6.f));
+        addChild(createLabel(mm2px(Vec(15, 50)), mm2px(Vec(10, 4)), "CV B", 6.f));
+
+        // Faders section header
+        addChild(createLabel(mm2px(Vec(10, 60)), mm2px(Vec(20, 5)), "FADERS", 8.f));
 
         // Fader outputs (bottom section, two columns)
         // Column 1: Faders 1-4
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, 75)), module, Core::FADER_OUTPUT_1));
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, 84)), module, Core::FADER_OUTPUT_1 + 1));
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, 93)), module, Core::FADER_OUTPUT_1 + 2));
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, 102)), module, Core::FADER_OUTPUT_1 + 3));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, 70)), module, Core::FADER_OUTPUT_1));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, 80)), module, Core::FADER_OUTPUT_1 + 1));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, 90)), module, Core::FADER_OUTPUT_1 + 2));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(10, 100)), module, Core::FADER_OUTPUT_1 + 3));
         // Column 2: Faders 5-8
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 75)), module, Core::FADER_OUTPUT_1 + 4));
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 84)), module, Core::FADER_OUTPUT_1 + 5));
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 93)), module, Core::FADER_OUTPUT_1 + 6));
-        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 102)), module, Core::FADER_OUTPUT_1 + 7));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 70)), module, Core::FADER_OUTPUT_1 + 4));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 80)), module, Core::FADER_OUTPUT_1 + 5));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 90)), module, Core::FADER_OUTPUT_1 + 6));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(30, 100)), module, Core::FADER_OUTPUT_1 + 7));
+
+        // Fader row numbers (between columns)
+        addChild(createLabel(mm2px(Vec(15, 68)), mm2px(Vec(10, 4)), "1    5", 6.f));
+        addChild(createLabel(mm2px(Vec(15, 78)), mm2px(Vec(10, 4)), "2    6", 6.f));
+        addChild(createLabel(mm2px(Vec(15, 88)), mm2px(Vec(10, 4)), "3    7", 6.f));
+        addChild(createLabel(mm2px(Vec(15, 98)), mm2px(Vec(10, 4)), "4    8", 6.f));
     }
 
     void appendContextMenu(Menu* menu) override {

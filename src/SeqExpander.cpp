@@ -79,13 +79,11 @@ struct SeqExpander : Module {
                     outputs[TRIG_B_OUTPUT + s].setVoltage(triggerPulsesB[s].process(args.sampleTime) ? 10.f : 0.f);
 
                     // Output CV A from value knob (0-5V at 1V/oct)
-                    // In single mode, use full range; in dual mode, use first 8 knobs
                     int knobIndexA = seq.currentValueIndexA;
                     float cvA = msg->knobValues[layout][knobIndexA] / 127.f * 5.f;
                     outputs[CV_A_OUTPUT + s].setVoltage(cvA);
 
                     // Output CV B from value knob (0-5V at 1V/oct)
-                    // In single mode, same as A; in dual mode, use knobs 8-15
                     int knobIndexB = seq.isValueSingleMode ? seq.currentValueIndexA : (8 + seq.currentValueIndexB);
                     float cvB = msg->knobValues[layout][knobIndexB] / 127.f * 5.f;
                     outputs[CV_B_OUTPUT + s].setVoltage(cvB);
@@ -119,6 +117,20 @@ struct SeqExpander : Module {
     }
 };
 
+// Simple label widget for panel text
+struct SeqPanelLabel : widget::Widget {
+    std::string text;
+    NVGcolor color = nvgRGB(0x99, 0x99, 0x99);
+    float fontSize = 8.f;
+
+    void draw(const DrawArgs& args) override {
+        nvgFontSize(args.vg, fontSize);
+        nvgFillColor(args.vg, color);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgText(args.vg, box.size.x / 2, box.size.y / 2, text.c_str(), NULL);
+    }
+};
+
 struct SeqExpanderWidget : ModuleWidget {
     SeqExpanderWidget(SeqExpander* module) {
         setModule(module);
@@ -133,8 +145,9 @@ struct SeqExpanderWidget : ModuleWidget {
         // Connected light
         addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(5, 10)), module, SeqExpander::CONNECTED_LIGHT));
 
+        float y = 22.f;
+
         // Trigger A outputs (8 jacks) - Column 1
-        float y = 20.f;
         for (int i = 0; i < 8; i++) {
             addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.5, y + i * 10)), module, SeqExpander::TRIG_A_OUTPUT + i));
         }
@@ -152,6 +165,26 @@ struct SeqExpanderWidget : ModuleWidget {
         // CV B outputs (8 jacks) - Column 4
         for (int i = 0; i < 8; i++) {
             addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(37.5, y + i * 10)), module, SeqExpander::CV_B_OUTPUT + i));
+        }
+
+        // Column labels
+        auto addLabel = [this](Vec pos, Vec size, std::string text, float fontSize = 7.f) {
+            SeqPanelLabel* label = new SeqPanelLabel();
+            label->box.pos = pos;
+            label->box.size = size;
+            label->text = text;
+            label->fontSize = fontSize;
+            addChild(label);
+        };
+
+        addLabel(mm2px(Vec(0, 14)), mm2px(Vec(15, 4)), "TRG A");
+        addLabel(mm2px(Vec(10, 14)), mm2px(Vec(15, 4)), "TRG B");
+        addLabel(mm2px(Vec(20, 14)), mm2px(Vec(15, 4)), "CV A");
+        addLabel(mm2px(Vec(30, 14)), mm2px(Vec(15, 4)), "CV B");
+
+        // Row numbers (on the right side)
+        for (int i = 0; i < 8; i++) {
+            addLabel(mm2px(Vec(41, 20 + i * 10)), mm2px(Vec(5, 4)), std::to_string(i + 1), 6.f);
         }
     }
 };

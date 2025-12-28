@@ -1,6 +1,15 @@
 #pragma once
 #include <rack.hpp>
 
+// Message from ClockExpander (left of Core) to Core
+struct ClockExpanderMessage {
+    float clockA[8] = {0.f};  // Clock A voltages for each sequencer
+    float clockB[8] = {0.f};  // Clock B voltages for each sequencer
+    bool hasClockA[8] = {false};  // Whether clock A is connected (directly or via chain)
+    bool hasClockB[8] = {false};  // Whether clock B is connected
+    int64_t moduleId = -1;
+};
+
 // Expander message structure for sharing data from Core module
 struct LCXLExpanderMessage {
     // Knob values (all 9 layouts x 24 knobs)

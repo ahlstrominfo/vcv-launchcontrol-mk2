@@ -10,4 +10,5 @@ void init(Plugin* p) {
     p->addModel(modelKnobExpander);
     p->addModel(modelGateExpander);
     p->addModel(modelSeqExpander);
+    p->addModel(modelClockExpander);
 }

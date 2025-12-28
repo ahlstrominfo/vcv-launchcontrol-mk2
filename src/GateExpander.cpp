@@ -81,6 +81,20 @@ struct GateExpander : Module {
     }
 };
 
+// Simple label widget for panel text
+struct GatePanelLabel : widget::Widget {
+    std::string text;
+    NVGcolor color = nvgRGB(0x99, 0x99, 0x99);
+    float fontSize = 8.f;
+
+    void draw(const DrawArgs& args) override {
+        nvgFontSize(args.vg, fontSize);
+        nvgFillColor(args.vg, color);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgText(args.vg, box.size.x / 2, box.size.y / 2, text.c_str(), NULL);
+    }
+};
+
 struct GateExpanderWidget : ModuleWidget {
     GateExpanderWidget(GateExpander* module) {
         setModule(module);
@@ -96,7 +110,7 @@ struct GateExpanderWidget : ModuleWidget {
         addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(5, 10)), module, GateExpander::CONNECTED_LIGHT));
 
         // Focus row outputs (gates 1-8)
-        float y = 20.f;
+        float y = 22.f;
         for (int i = 0; i < 8; i++) {
             addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.5, y + i * 10)), module, GateExpander::GATE_OUTPUT + i));
         }
@@ -104,6 +118,24 @@ struct GateExpanderWidget : ModuleWidget {
         // Control row outputs (gates 9-16)
         for (int i = 0; i < 8; i++) {
             addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(17.5, y + i * 10)), module, GateExpander::GATE_OUTPUT + 8 + i));
+        }
+
+        // Column labels
+        auto addLabel = [this](Vec pos, Vec size, std::string text, float fontSize = 7.f) {
+            GatePanelLabel* label = new GatePanelLabel();
+            label->box.pos = pos;
+            label->box.size = size;
+            label->text = text;
+            label->fontSize = fontSize;
+            addChild(label);
+        };
+
+        addLabel(mm2px(Vec(0, 14)), mm2px(Vec(15, 4)), "FOCUS");
+        addLabel(mm2px(Vec(10, 14)), mm2px(Vec(15, 4)), "CTRL");
+
+        // Row numbers (on the right side)
+        for (int i = 0; i < 8; i++) {
+            addLabel(mm2px(Vec(21, 20 + i * 10)), mm2px(Vec(5, 4)), std::to_string(i + 1), 6.f);
         }
     }
 };

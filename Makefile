@@ -7,6 +7,7 @@ SOURCES += src/Core.cpp
 SOURCES += src/KnobExpander.cpp
 SOURCES += src/GateExpander.cpp
 SOURCES += src/SeqExpander.cpp
+SOURCES += src/ClockExpander.cpp
 
 # Add resources to distribution
 DISTRIBUTABLES += res

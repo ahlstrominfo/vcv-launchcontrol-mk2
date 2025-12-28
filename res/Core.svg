@@ -9,43 +9,6 @@
   <!-- Panel border -->
   <rect x="0.3" y="0.3" width="40.04" height="127.9" fill="none" stroke="#333333" stroke-width="0.6"/>
 
-  <!-- MIDI indicator area -->
-  <circle cx="7" cy="18" r="3" fill="none" stroke="#444444" stroke-width="0.3"/>
-
-  <!-- TAKE button area -->
-  <circle cx="20" cy="22" r="4" fill="none" stroke="#444444" stroke-width="0.3"/>
-
-  <!-- TAKE indicator area -->
-  <circle cx="27" cy="22" r="2" fill="none" stroke="#444444" stroke-width="0.3"/>
-
-  <!-- Clock/Reset inputs (left) -->
-  <circle cx="10" cy="35" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="10" cy="47" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="10" cy="59" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-
-  <!-- Sequencer outputs (right) -->
-  <circle cx="30" cy="35" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="30" cy="44" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="30" cy="53" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="30" cy="62" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-
-  <!-- Fader outputs - Column 1 (1-4) -->
-  <circle cx="10" cy="75" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="10" cy="84" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="10" cy="93" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="10" cy="102" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-
-  <!-- Fader outputs - Column 2 (5-8) -->
-  <circle cx="30" cy="75" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="30" cy="84" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="30" cy="93" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="30" cy="102" r="4.5" fill="none" stroke="#333333" stroke-width="0.4"/>
-
-  <!-- Section labels -->
-  <text x="10" y="30" font-size="2.5" fill="#666666" text-anchor="middle">CLK</text>
-  <text x="30" y="30" font-size="2.5" fill="#666666" text-anchor="middle">SEQ</text>
-  <text x="20" y="70" font-size="2.5" fill="#666666" text-anchor="middle">FADERS</text>
-
   <!-- Bottom accent -->
   <rect x="5" y="118" width="30.64" height="0.5" fill="#444444"/>
 </svg>

@@ -9,65 +9,6 @@
   <!-- Panel border -->
   <rect x="0.3" y="0.3" width="45.12" height="127.9" fill="none" stroke="#333333" stroke-width="0.6"/>
 
-  <!-- Title area -->
-  <text x="22.86" y="8" text-anchor="middle" font-family="sans-serif" font-size="2.5" fill="#9b59b6">SEQUENCER</text>
-
-  <!-- Column labels -->
-  <text x="7.5" y="16" text-anchor="middle" font-family="sans-serif" font-size="1.8" fill="#666666">TrA</text>
-  <text x="17.5" y="16" text-anchor="middle" font-family="sans-serif" font-size="1.8" fill="#666666">TrB</text>
-  <text x="27.5" y="16" text-anchor="middle" font-family="sans-serif" font-size="1.8" fill="#666666">CVA</text>
-  <text x="37.5" y="16" text-anchor="middle" font-family="sans-serif" font-size="1.8" fill="#666666">CVB</text>
-
-  <!-- Output decorative rings - Trigger A column -->
-  <circle cx="7.5" cy="20" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="7.5" cy="30" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="7.5" cy="40" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="7.5" cy="50" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="7.5" cy="60" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="7.5" cy="70" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="7.5" cy="80" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="7.5" cy="90" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-
-  <!-- Output decorative rings - Trigger B column -->
-  <circle cx="17.5" cy="20" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="17.5" cy="30" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="17.5" cy="40" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="17.5" cy="50" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="17.5" cy="60" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="17.5" cy="70" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="17.5" cy="80" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="17.5" cy="90" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-
-  <!-- Output decorative rings - CV A column -->
-  <circle cx="27.5" cy="20" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="27.5" cy="30" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="27.5" cy="40" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="27.5" cy="50" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="27.5" cy="60" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="27.5" cy="70" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="27.5" cy="80" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="27.5" cy="90" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-
-  <!-- Output decorative rings - CV B column -->
-  <circle cx="37.5" cy="20" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="37.5" cy="30" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="37.5" cy="40" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="37.5" cy="50" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="37.5" cy="60" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="37.5" cy="70" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="37.5" cy="80" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-  <circle cx="37.5" cy="90" r="4" fill="none" stroke="#333333" stroke-width="0.4"/>
-
-  <!-- Row numbers -->
-  <text x="2" y="21" font-family="sans-serif" font-size="1.5" fill="#555555">1</text>
-  <text x="2" y="31" font-family="sans-serif" font-size="1.5" fill="#555555">2</text>
-  <text x="2" y="41" font-family="sans-serif" font-size="1.5" fill="#555555">3</text>
-  <text x="2" y="51" font-family="sans-serif" font-size="1.5" fill="#555555">4</text>
-  <text x="2" y="61" font-family="sans-serif" font-size="1.5" fill="#555555">5</text>
-  <text x="2" y="71" font-family="sans-serif" font-size="1.5" fill="#555555">6</text>
-  <text x="2" y="81" font-family="sans-serif" font-size="1.5" fill="#555555">7</text>
-  <text x="2" y="91" font-family="sans-serif" font-size="1.5" fill="#555555">8</text>
-
   <!-- Bottom accent -->
   <rect x="5" y="118" width="35.72" height="0.5" fill="#444444"/>
 </svg>

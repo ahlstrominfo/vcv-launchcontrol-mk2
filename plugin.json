@@ -36,6 +36,12 @@
       "name": "Sequencer Expander",
       "description": "Outputs triggers and CV from all 8 sequencers",
       "tags": ["Expander", "Sequencer"]
+    },
+    {
+      "slug": "ClockExpander",
+      "name": "Clock Expander",
+      "description": "Provides per-sequencer clock inputs (place on LEFT of Core)",
+      "tags": ["Expander", "Clock"]
     }
   ]
 }
