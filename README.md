@@ -311,10 +311,12 @@ All expanders (except ClockExpander) can be placed in any order to the right of 
    cd vcv-launchcontrol
    ```
 
-2. Set the Rack SDK path (or place `Rack-SDK` folder in the plugin directory):
-   ```bash
-   export RACK_DIR=/path/to/Rack-SDK
-   ```
+2. Get the Rack SDK - either:
+   - **Option A**: Place the `Rack-SDK` folder in the plugin directory (recommended)
+   - **Option B**: Set the path to your SDK:
+     ```bash
+     export RACK_DIR=/path/to/Rack-SDK
+     ```
 
 3. Build:
    ```bash
