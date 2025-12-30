@@ -3,7 +3,7 @@
   <!-- Panel background -->
   <rect width="25.4" height="128.5" fill="#1a1a1a"/>
 
-  <!-- Top accent stripe -->
+  <!-- Top accent stripe - Emerald Green -->
   <rect x="0" y="0" width="25.4" height="3" fill="#2ecc71"/>
 
   <!-- Panel border -->

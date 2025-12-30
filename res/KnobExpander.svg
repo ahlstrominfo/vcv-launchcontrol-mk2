@@ -3,7 +3,7 @@
   <!-- Panel background -->
   <rect width="35.56" height="128.5" fill="#1a1a1a"/>
 
-  <!-- Top accent stripe -->
+  <!-- Top accent stripe - Ocean Blue -->
   <rect x="0" y="0" width="35.56" height="3" fill="#3498db"/>
 
   <!-- Panel border -->

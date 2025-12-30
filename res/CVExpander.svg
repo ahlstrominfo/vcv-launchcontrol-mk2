@@ -3,8 +3,8 @@
   <!-- Panel background -->
   <rect width="35.56" height="128.5" fill="#1a1a1a"/>
 
-  <!-- Top accent stripe -->
-  <rect x="0" y="0" width="35.56" height="3" fill="#3498db"/>
+  <!-- Top accent stripe - Sunflower Yellow -->
+  <rect x="0" y="0" width="35.56" height="3" fill="#f1c40f"/>
 
   <!-- Panel border -->
   <rect x="0.3" y="0.3" width="34.96" height="127.9" fill="none" stroke="#333333" stroke-width="0.6"/>

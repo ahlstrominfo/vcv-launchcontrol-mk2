@@ -3,8 +3,8 @@
   <!-- Panel background -->
   <rect width="25.4" height="128.5" fill="#1a1a1a"/>
 
-  <!-- Top accent stripe -->
-  <rect x="0" y="0" width="25.4" height="3" fill="#e74c3c"/>
+  <!-- Top accent stripe - Carrot Orange -->
+  <rect x="0" y="0" width="25.4" height="3" fill="#e67e22"/>
 
   <!-- Panel border -->
   <rect x="0.3" y="0.3" width="24.8" height="127.9" fill="none" stroke="#333333" stroke-width="0.6"/>
