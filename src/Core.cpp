@@ -134,6 +134,9 @@ struct Core : Module {
     // Button toggle states for default layout (16 buttons)
     bool buttonStates[16] = {false};
 
+    // Button momentary mode for default layout (true = momentary, false = toggle)
+    bool buttonMomentary[16] = {false};
+
     // Sequencer states (8 sequencers)
     struct Sequencer {
         bool steps[16] = {false};       // Step on/off (all 16 buttons)
@@ -800,6 +803,7 @@ struct Core : Module {
         // Copy button states
         for (int i = 0; i < 16; i++) {
             expanderMessage.buttonStates[i] = buttonStates[i];
+            expanderMessage.buttonMomentary[i] = buttonMomentary[i];
         }
 
         // Copy sequencer data
@@ -1073,6 +1077,34 @@ struct Core : Module {
             return;
         }
 
+        // If Record Arm is held in default layout, toggle button momentary mode
+        if (recArmHeld && currentLayout == 0) {
+            // Track Focus buttons = buttons 0-7
+            for (int i = 0; i < 8; i++) {
+                if (note == LCXL::TRACK_FOCUS[i]) {
+                    buttonMomentary[i] = !buttonMomentary[i];
+                    // If switching to momentary, turn off the gate
+                    if (buttonMomentary[i]) {
+                        buttonStates[i] = false;
+                    }
+                    updateButtonLED(i, buttonStates[i]);
+                    return;
+                }
+            }
+            // Track Control buttons = buttons 8-15
+            for (int i = 0; i < 8; i++) {
+                if (note == LCXL::TRACK_CONTROL[i]) {
+                    buttonMomentary[8 + i] = !buttonMomentary[8 + i];
+                    // If switching to momentary, turn off the gate
+                    if (buttonMomentary[8 + i]) {
+                        buttonStates[8 + i] = false;
+                    }
+                    updateButtonLED(8 + i, buttonStates[8 + i]);
+                    return;
+                }
+            }
+        }
+
         // If Record Arm is held in sequencer mode, handle mode selection and voltage/bipolar settings
         if (recArmHeld && currentLayout > 0) {
             Sequencer& seq = sequencers[currentLayout - 1];
@@ -1305,8 +1337,33 @@ struct Core : Module {
             // Restore normal LEDs when releasing Record Arm
             if (currentLayout > 0) {
                 updateSequencerLEDs();
+            } else {
+                // In default layout, update button LEDs to show momentary mode indicators
+                for (int i = 0; i < 16; i++) {
+                    updateButtonLED(i, buttonStates[i]);
+                }
             }
             return;
+        }
+
+        // Handle momentary button release in default mode
+        if (currentLayout == 0) {
+            // Track Focus buttons = buttons 0-7
+            for (int i = 0; i < 8; i++) {
+                if (note == LCXL::TRACK_FOCUS[i] && buttonMomentary[i]) {
+                    buttonStates[i] = false;
+                    updateButtonLED(i, buttonStates[i]);
+                    return;
+                }
+            }
+            // Track Control buttons = buttons 8-15
+            for (int i = 0; i < 8; i++) {
+                if (note == LCXL::TRACK_CONTROL[i] && buttonMomentary[8 + i]) {
+                    buttonStates[8 + i] = false;
+                    updateButtonLED(8 + i, buttonStates[8 + i]);
+                    return;
+                }
+            }
         }
     }
 
@@ -1314,7 +1371,13 @@ struct Core : Module {
         // Track Focus buttons = gates 1-8
         for (int i = 0; i < 8; i++) {
             if (note == LCXL::TRACK_FOCUS[i]) {
-                buttonStates[i] = !buttonStates[i];
+                if (buttonMomentary[i]) {
+                    // Momentary mode: turn on when pressed
+                    buttonStates[i] = true;
+                } else {
+                    // Toggle mode: toggle on/off
+                    buttonStates[i] = !buttonStates[i];
+                }
                 updateButtonLED(i, buttonStates[i]);
                 return;
             }
@@ -1323,7 +1386,13 @@ struct Core : Module {
         // Track Control buttons = gates 9-16
         for (int i = 0; i < 8; i++) {
             if (note == LCXL::TRACK_CONTROL[i]) {
-                buttonStates[8 + i] = !buttonStates[8 + i];
+                if (buttonMomentary[8 + i]) {
+                    // Momentary mode: turn on when pressed
+                    buttonStates[8 + i] = true;
+                } else {
+                    // Toggle mode: toggle on/off
+                    buttonStates[8 + i] = !buttonStates[8 + i];
+                }
                 updateButtonLED(8 + i, buttonStates[8 + i]);
                 return;
             }
@@ -1400,7 +1469,16 @@ struct Core : Module {
     }
 
     void updateButtonLED(int buttonIndex, bool on) {
-        uint8_t color = on ? LCXL::LED_GREEN_FULL : LCXL::LED_OFF;
+        uint8_t color;
+        if (currentLayout == 0 && buttonMomentary[buttonIndex]) {
+            // Momentary mode in default layout:
+            // - Dim green when off (to indicate momentary mode)
+            // - Bright green when on (active)
+            color = on ? LCXL::LED_GREEN_FULL : LCXL::LED_GREEN_LOW;
+        } else {
+            // Toggle mode: off when off, green when on
+            color = on ? LCXL::LED_GREEN_FULL : LCXL::LED_OFF;
+        }
         sendButtonLEDSysEx(buttonIndex, color);
     }
 
@@ -1505,6 +1583,13 @@ struct Core : Module {
         }
         json_object_set_new(rootJ, "buttons", buttonsJ);
 
+        // Save button momentary modes
+        json_t* momentaryJ = json_array();
+        for (int i = 0; i < 16; i++) {
+            json_array_append_new(momentaryJ, json_boolean(buttonMomentary[i]));
+        }
+        json_object_set_new(rootJ, "buttonMomentary", momentaryJ);
+
         // Save sequencer states
         json_t* seqsJ = json_array();
         for (int s = 0; s < 8; s++) {
@@ -1589,6 +1674,15 @@ struct Core : Module {
             for (int i = 0; i < 16; i++) {
                 json_t* valJ = json_array_get(buttonsJ, i);
                 if (valJ) buttonStates[i] = json_boolean_value(valJ);
+            }
+        }
+
+        // Load button momentary modes
+        json_t* momentaryJ = json_object_get(rootJ, "buttonMomentary");
+        if (momentaryJ) {
+            for (int i = 0; i < 16; i++) {
+                json_t* valJ = json_array_get(momentaryJ, i);
+                if (valJ) buttonMomentary[i] = json_boolean_value(valJ);
             }
         }
 

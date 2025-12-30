@@ -87,7 +87,12 @@ Shows the most recent parameter change for easy feedback.
 ### Default Layout (Layout 0)
 - **Knobs**: 24 CV outputs via KnobExpander
 - **Faders**: 8 CV outputs directly from Core
-- **Buttons**: 16 toggle gates via GateExpander
+- **Buttons**: 16 toggle/momentary gates via GateExpander
+
+**Button Modes:**
+- Hold **Record Arm** + press a button to toggle between Toggle and Momentary mode
+- **Toggle mode** (default): Press to turn on, press again to turn off
+- **Momentary mode**: Gate is only on while button is held, shown with dim green LED
 
 ### Sequencer Layouts (1-8)
 Hold **Device** + press **Track Control 1-8** to enter a sequencer.
@@ -267,6 +272,12 @@ While in a sequencer layout, hold **Device** + press **Track Focus**:
 - **Dim Red** - Playhead on inactive step
 - **Off** - Inactive step
 - **Amber** - Length boundary
+
+### Button Modes (Default Layout)
+- **Off** - Toggle mode, gate off
+- **Bright Green** - Toggle mode, gate on
+- **Dim Green** - Momentary mode, gate off (indicates button is momentary)
+- **Bright Green (when held)** - Momentary mode, gate on
 
 ## Expander Chaining
 

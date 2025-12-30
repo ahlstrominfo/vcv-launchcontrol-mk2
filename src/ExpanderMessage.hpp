@@ -55,6 +55,9 @@ struct LCXLExpanderMessage {
     // Button states (default mode)
     bool buttonStates[16] = {false};
 
+    // Button momentary mode (true = momentary, false = toggle)
+    bool buttonMomentary[16] = {false};
+
     // Sequencer data for all 8 sequencers
     struct SequencerData {
         bool steps[16] = {false};
