@@ -18,9 +18,10 @@ enum ChangeType {
     CHANGE_VALUE_LENGTH_B,
     CHANGE_STEP_LENGTH_A,
     CHANGE_STEP_LENGTH_B,
-    CHANGE_PROB_A,
-    CHANGE_PROB_B,
     CHANGE_BIAS,
+    CHANGE_CV1,
+    CHANGE_CV2,
+    CHANGE_CV3,
     CHANGE_VOLTAGE_A,
     CHANGE_VOLTAGE_B,
     CHANGE_BIPOLAR_A,
@@ -75,6 +76,11 @@ struct LCXLExpanderMessage {
         // Mode flags
         bool isValueSingleMode = false;  // true = all 16 values for A
         bool isStepSingleMode = false;   // true = all 16 steps for A
+
+        // Per-sequencer CV values (knobs 6-8, MIDI 0-127)
+        int cv1 = 0;
+        int cv2 = 0;
+        int cv3 = 0;
 
         // Voltage settings (0=5V, 1=10V, 2=1V)
         int voltageRangeA = 0;

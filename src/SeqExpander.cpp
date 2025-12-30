@@ -64,7 +64,9 @@ struct SeqExpander : Module {
 
     bool isValidExpander(Module* m) {
         return m && (m->model == modelCore || m->model == modelKnobExpander ||
-                     m->model == modelGateExpander || m->model == modelSeqExpander);
+                     m->model == modelGateExpander || m->model == modelSeqExpander ||
+                     m->model == modelCVExpander || m->model == modelInfoDisplay ||
+                     m->model == modelStepDisplay);
     }
 
     void process(const ProcessArgs& args) override {
@@ -203,6 +205,11 @@ struct SeqExpanderWidget : ModuleWidget {
         for (int i = 0; i < 8; i++) {
             addLabel(mm2px(Vec(41, 20 + i * 10)), mm2px(Vec(5, 4)), std::to_string(i + 1), 6.f);
         }
+
+        // Module name at bottom
+        addLabel(mm2px(Vec(15, 110)), mm2px(Vec(15, 8)), "SEQ", 14.f);
+        // Brand below line
+        addLabel(mm2px(Vec(15, 120)), mm2px(Vec(15, 8)), "LCXL", 14.f);
     }
 };
 

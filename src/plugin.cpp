@@ -13,4 +13,5 @@ void init(Plugin* p) {
     p->addModel(modelClockExpander);
     p->addModel(modelStepDisplay);
     p->addModel(modelInfoDisplay);
+    p->addModel(modelCVExpander);
 }

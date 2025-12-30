@@ -1,7 +1,7 @@
 #include "plugin.hpp"
 #include "ExpanderMessage.hpp"
 
-struct GateExpander : Module {
+struct CVExpander : Module {
     enum ParamId {
         PARAMS_LEN
     };
@@ -9,7 +9,9 @@ struct GateExpander : Module {
         INPUTS_LEN
     };
     enum OutputId {
-        ENUMS(GATE_OUTPUT, 16),
+        ENUMS(CV1_OUTPUT, 8),
+        ENUMS(CV2_OUTPUT, 8),
+        ENUMS(CV3_OUTPUT, 8),
         OUTPUTS_LEN
     };
     enum LightId {
@@ -20,15 +22,14 @@ struct GateExpander : Module {
     LCXLExpanderMessage leftMessages[2];
     LCXLExpanderMessage expanderMessage;  // For forwarding to right
 
-    GateExpander() {
+    CVExpander() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
 
-        // Configure gate outputs
+        // Configure CV outputs
         for (int i = 0; i < 8; i++) {
-            configOutput(GATE_OUTPUT + i, string::f("Gate %d (Focus)", i + 1));
-        }
-        for (int i = 0; i < 8; i++) {
-            configOutput(GATE_OUTPUT + 8 + i, string::f("Gate %d (Control)", i + 1));
+            configOutput(CV1_OUTPUT + i, string::f("Sequencer %d CV 1", i + 1));
+            configOutput(CV2_OUTPUT + i, string::f("Sequencer %d CV 2", i + 1));
+            configOutput(CV3_OUTPUT + i, string::f("Sequencer %d CV 3", i + 1));
         }
 
         // Setup expander message buffers
@@ -53,9 +54,13 @@ struct GateExpander : Module {
             if (msg && msg->moduleId >= 0) {
                 connected = true;
 
-                // Output button states as gates (10V when on, 0V when off)
-                for (int i = 0; i < 16; i++) {
-                    outputs[GATE_OUTPUT + i].setVoltage(msg->buttonStates[i] ? 10.f : 0.f);
+                for (int s = 0; s < 8; s++) {
+                    auto& seq = msg->sequencers[s];
+
+                    // Output CV values (0-127 mapped to 0-10V)
+                    outputs[CV1_OUTPUT + s].setVoltage(seq.cv1 / 127.f * 10.f);
+                    outputs[CV2_OUTPUT + s].setVoltage(seq.cv2 / 127.f * 10.f);
+                    outputs[CV3_OUTPUT + s].setVoltage(seq.cv3 / 127.f * 10.f);
                 }
 
                 // Store for forwarding
@@ -74,8 +79,10 @@ struct GateExpander : Module {
 
         // If not connected, output zeros
         if (!connected) {
-            for (int i = 0; i < 16; i++) {
-                outputs[GATE_OUTPUT + i].setVoltage(0.f);
+            for (int s = 0; s < 8; s++) {
+                outputs[CV1_OUTPUT + s].setVoltage(0.f);
+                outputs[CV2_OUTPUT + s].setVoltage(0.f);
+                outputs[CV3_OUTPUT + s].setVoltage(0.f);
             }
         }
 
@@ -84,7 +91,7 @@ struct GateExpander : Module {
 };
 
 // Simple label widget for panel text
-struct GatePanelLabel : widget::Widget {
+struct CVPanelLabel : widget::Widget {
     std::string text;
     NVGcolor color = nvgRGB(0x99, 0x99, 0x99);
     float fontSize = 8.f;
@@ -97,10 +104,10 @@ struct GatePanelLabel : widget::Widget {
     }
 };
 
-struct GateExpanderWidget : ModuleWidget {
-    GateExpanderWidget(GateExpander* module) {
+struct CVExpanderWidget : ModuleWidget {
+    CVExpanderWidget(CVExpander* module) {
         setModule(module);
-        setPanel(createPanel(asset::plugin(pluginInstance, "res/GateExpander.svg")));
+        setPanel(createPanel(asset::plugin(pluginInstance, "res/CVExpander.svg")));
 
         // Screws
         addChild(createWidget<ScrewSilver>(Vec(RACK_GRID_WIDTH, 0)));
@@ -109,22 +116,28 @@ struct GateExpanderWidget : ModuleWidget {
         addChild(createWidget<ScrewSilver>(Vec(box.size.x - 2 * RACK_GRID_WIDTH, RACK_GRID_HEIGHT - RACK_GRID_WIDTH)));
 
         // Connected light
-        addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(5, 10)), module, GateExpander::CONNECTED_LIGHT));
+        addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(5, 10)), module, CVExpander::CONNECTED_LIGHT));
 
-        // Focus row outputs (gates 1-8)
         float y = 22.f;
+
+        // CV1 outputs (8 jacks) - Column 1
         for (int i = 0; i < 8; i++) {
-            addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.5, y + i * 10)), module, GateExpander::GATE_OUTPUT + i));
+            addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(7.5, y + i * 10)), module, CVExpander::CV1_OUTPUT + i));
         }
 
-        // Control row outputs (gates 9-16)
+        // CV2 outputs (8 jacks) - Column 2
         for (int i = 0; i < 8; i++) {
-            addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(17.5, y + i * 10)), module, GateExpander::GATE_OUTPUT + 8 + i));
+            addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(17.5, y + i * 10)), module, CVExpander::CV2_OUTPUT + i));
+        }
+
+        // CV3 outputs (8 jacks) - Column 3
+        for (int i = 0; i < 8; i++) {
+            addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(27.5, y + i * 10)), module, CVExpander::CV3_OUTPUT + i));
         }
 
         // Column labels
         auto addLabel = [this](Vec pos, Vec size, std::string text, float fontSize = 7.f) {
-            GatePanelLabel* label = new GatePanelLabel();
+            CVPanelLabel* label = new CVPanelLabel();
             label->box.pos = pos;
             label->box.size = size;
             label->text = text;
@@ -132,19 +145,20 @@ struct GateExpanderWidget : ModuleWidget {
             addChild(label);
         };
 
-        addLabel(mm2px(Vec(0, 14)), mm2px(Vec(15, 4)), "FOCUS");
-        addLabel(mm2px(Vec(10, 14)), mm2px(Vec(15, 4)), "CTRL");
+        addLabel(mm2px(Vec(0, 14)), mm2px(Vec(15, 4)), "CV 1");
+        addLabel(mm2px(Vec(10, 14)), mm2px(Vec(15, 4)), "CV 2");
+        addLabel(mm2px(Vec(20, 14)), mm2px(Vec(15, 4)), "CV 3");
 
         // Row numbers (on the right side)
         for (int i = 0; i < 8; i++) {
-            addLabel(mm2px(Vec(21, 20 + i * 10)), mm2px(Vec(5, 4)), std::to_string(i + 1), 6.f);
+            addLabel(mm2px(Vec(31, 20 + i * 10)), mm2px(Vec(5, 4)), std::to_string(i + 1), 6.f);
         }
 
         // Module name at bottom
-        addLabel(mm2px(Vec(5, 110)), mm2px(Vec(15, 8)), "GAT", 14.f);
+        addLabel(mm2px(Vec(10, 110)), mm2px(Vec(15, 8)), "CVE", 14.f);
         // Brand below line
-        addLabel(mm2px(Vec(5, 120)), mm2px(Vec(15, 8)), "LCXL", 14.f);
+        addLabel(mm2px(Vec(10, 120)), mm2px(Vec(15, 8)), "LCXL", 14.f);
     }
 };
 
-Model* modelGateExpander = createModel<GateExpander, GateExpanderWidget>("GateExpander");
+Model* modelCVExpander = createModel<CVExpander, CVExpanderWidget>("CVExpander");

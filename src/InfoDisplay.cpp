@@ -35,7 +35,13 @@ struct InfoDisplay : Module {
     bool isValidExpander(Module* m) {
         return m && (m->model == modelCore || m->model == modelKnobExpander ||
                      m->model == modelGateExpander || m->model == modelSeqExpander ||
-                     m->model == modelStepDisplay || m->model == modelInfoDisplay);
+                     m->model == modelStepDisplay || m->model == modelInfoDisplay ||
+                     m->model == modelCVExpander);
+    }
+
+    // Check if right side has a valid expander (for receiving from right)
+    bool isValidRightExpander(Module* m) {
+        return isValidExpander(m);
     }
 
     std::string getChangeTypeName(ChangeType type) {
@@ -45,9 +51,10 @@ struct InfoDisplay : Module {
             case CHANGE_VALUE_LENGTH_B: return "Val Len B";
             case CHANGE_STEP_LENGTH_A: return "Step Len A";
             case CHANGE_STEP_LENGTH_B: return "Step Len B";
-            case CHANGE_PROB_A: return "Prob A";
-            case CHANGE_PROB_B: return "Prob B";
             case CHANGE_BIAS: return "Bias";
+            case CHANGE_CV1: return "CV 1";
+            case CHANGE_CV2: return "CV 2";
+            case CHANGE_CV3: return "CV 3";
             case CHANGE_VOLTAGE_A: return "Voltage A";
             case CHANGE_VOLTAGE_B: return "Voltage B";
             case CHANGE_BIPOLAR_A: return "Bipolar A";
@@ -69,10 +76,12 @@ struct InfoDisplay : Module {
             case CHANGE_STEP_LENGTH_A:
             case CHANGE_STEP_LENGTH_B:
                 return std::to_string(value);
-            case CHANGE_PROB_A:
-            case CHANGE_PROB_B:
             case CHANGE_BIAS:
                 return std::to_string(value) + "%";
+            case CHANGE_CV1:
+            case CHANGE_CV2:
+            case CHANGE_CV3:
+                return std::to_string(value);  // Raw MIDI value 0-127
             case CHANGE_VOLTAGE_A:
             case CHANGE_VOLTAGE_B:
                 switch (value) {
@@ -207,6 +216,20 @@ struct InfoDisplayWidget : widget::Widget {
     }
 };
 
+// Simple label widget for panel text
+struct InfoPanelLabel : widget::Widget {
+    std::string text;
+    NVGcolor color = nvgRGB(0x99, 0x99, 0x99);
+    float fontSize = 8.f;
+
+    void draw(const DrawArgs& args) override {
+        nvgFontSize(args.vg, fontSize);
+        nvgFillColor(args.vg, color);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgText(args.vg, box.size.x / 2, box.size.y / 2, text.c_str(), NULL);
+    }
+};
+
 struct InfoDisplayModuleWidget : ModuleWidget {
     InfoDisplayModuleWidget(InfoDisplay* module) {
         setModule(module);
@@ -227,6 +250,22 @@ struct InfoDisplayModuleWidget : ModuleWidget {
         display->box.size = mm2px(Vec(24, 20));
         display->module = module;
         addChild(display);
+
+        // Module name at bottom
+        InfoPanelLabel* label = new InfoPanelLabel();
+        label->box.pos = mm2px(Vec(8, 110));
+        label->box.size = mm2px(Vec(15, 8));
+        label->text = "INF";
+        label->fontSize = 14.f;
+        addChild(label);
+
+        // Brand below line
+        InfoPanelLabel* brand = new InfoPanelLabel();
+        brand->box.pos = mm2px(Vec(8, 120));
+        brand->box.size = mm2px(Vec(15, 8));
+        brand->text = "LCXL";
+        brand->fontSize = 14.f;
+        addChild(brand);
     }
 };
 

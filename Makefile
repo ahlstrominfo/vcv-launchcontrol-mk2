@@ -10,6 +10,7 @@ SOURCES += src/SeqExpander.cpp
 SOURCES += src/ClockExpander.cpp
 SOURCES += src/StepDisplay.cpp
 SOURCES += src/InfoDisplay.cpp
+SOURCES += src/CVExpander.cpp
 
 # Add resources to distribution
 DISTRIBUTABLES += res

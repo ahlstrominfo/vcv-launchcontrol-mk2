@@ -14,3 +14,4 @@ extern Model* modelSeqExpander;
 extern Model* modelClockExpander;
 extern Model* modelStepDisplay;
 extern Model* modelInfoDisplay;
+extern Model* modelCVExpander;

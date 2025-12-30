@@ -31,7 +31,8 @@ struct StepDisplay : Module {
     bool isValidExpander(Module* m) {
         return m && (m->model == modelCore || m->model == modelKnobExpander ||
                      m->model == modelGateExpander || m->model == modelSeqExpander ||
-                     m->model == modelStepDisplay);
+                     m->model == modelStepDisplay || m->model == modelCVExpander ||
+                     m->model == modelInfoDisplay);
     }
 
     void process(const ProcessArgs& args) override {
@@ -125,6 +126,20 @@ struct StepDisplay : Module {
     }
 };
 
+// Simple label widget for panel text
+struct StepPanelLabel : widget::Widget {
+    std::string text;
+    NVGcolor color = nvgRGB(0x99, 0x99, 0x99);
+    float fontSize = 8.f;
+
+    void draw(const DrawArgs& args) override {
+        nvgFontSize(args.vg, fontSize);
+        nvgFillColor(args.vg, color);
+        nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgText(args.vg, box.size.x / 2, box.size.y / 2, text.c_str(), NULL);
+    }
+};
+
 struct StepDisplayWidget : ModuleWidget {
     StepDisplayWidget(StepDisplay* module) {
         setModule(module);
@@ -155,6 +170,22 @@ struct StepDisplayWidget : ModuleWidget {
                     mm2px(Vec(x, y)), module, StepDisplay::STEP_LIGHTS + lightIndex));
             }
         }
+
+        // Module name at bottom
+        StepPanelLabel* label = new StepPanelLabel();
+        label->box.pos = mm2px(Vec(30, 110));
+        label->box.size = mm2px(Vec(15, 8));
+        label->text = "STP";
+        label->fontSize = 14.f;
+        addChild(label);
+
+        // Brand below line
+        StepPanelLabel* brand = new StepPanelLabel();
+        brand->box.pos = mm2px(Vec(30, 120));
+        brand->box.size = mm2px(Vec(15, 8));
+        brand->text = "LCXL";
+        brand->fontSize = 14.f;
+        addChild(brand);
     }
 };
 

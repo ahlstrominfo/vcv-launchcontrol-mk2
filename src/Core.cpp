@@ -144,10 +144,11 @@ struct Core : Module {
         int stepLengthA = 8;            // Step length for Seq A (1-16)
         int stepLengthB = 4;            // Step length for Seq B (0-8, 0=disabled)
 
-        // Probability and bias (from knobs 5-7)
-        float probA = 1.0f;             // Probability A fires (0-1)
-        float probB = 1.0f;             // Probability B fires (0-1)
+        // Bias and per-sequencer CV values (from knobs 5-8)
         float bias = 0.5f;              // Competition/routing bias (0-1)
+        int cv1 = 0;                    // Per-sequencer CV 1 (MIDI 0-127)
+        int cv2 = 0;                    // Per-sequencer CV 2 (MIDI 0-127)
+        int cv3 = 0;                    // Per-sequencer CV 3 (MIDI 0-127)
 
         // Mode selection
         int competitionMode = COMP_INDEPENDENT;  // For dual mode
@@ -439,9 +440,6 @@ struct Core : Module {
         // Check if step is active
         if (!seq.steps[seq.currentStepA]) return;
 
-        // Apply probability
-        if (random::uniform() >= seq.probA) return;
-
         // Advance value index
         seq.currentValueIndexA = (seq.currentValueIndexA + 1) % seq.valueLengthA;
 
@@ -508,9 +506,6 @@ struct Core : Module {
         // Check if step is active (top row buttons = steps 0-7)
         if (!seq.steps[seq.currentStepA]) return;
 
-        // Apply probability
-        if (random::uniform() >= seq.probA) return;
-
         // Check for competition with B
         bool aWantsToFire = true;
         bool bWantsToFire = (seq.stepLengthB > 0) && seq.steps[8 + (seq.currentStepB % seq.stepLengthB)];
@@ -530,33 +525,19 @@ struct Core : Module {
         Sequencer& seq = sequencers[seqIndex];
 
         // B disabled if length is 0
-        if (seq.stepLengthB <= 0) {
-            INFO("SeqB[%d]: stepLengthB=0, skipping", seqIndex);
-            return;
-        }
+        if (seq.stepLengthB <= 0) return;
 
         // Advance step B
         seq.currentStepB = (seq.currentStepB + 1) % seq.stepLengthB;
 
         // Check if step is active (bottom row buttons = steps 8-15)
-        if (!seq.steps[8 + seq.currentStepB]) {
-            INFO("SeqB[%d]: step %d inactive, skipping", seqIndex, seq.currentStepB);
-            return;
-        }
-
-        // Apply probability
-        float probRoll = random::uniform();
-        if (probRoll >= seq.probB) {
-            INFO("SeqB[%d]: prob failed (roll=%.2f >= probB=%.2f)", seqIndex, probRoll, seq.probB);
-            return;
-        }
+        if (!seq.steps[8 + seq.currentStepB]) return;
 
         // Check for competition with A
         bool aWantsToFire = seq.steps[seq.currentStepA % seq.stepLengthA];
         bool bWantsToFire = true;
 
         bool bWins = !resolveCompetition(seq, aWantsToFire, bWantsToFire, false);
-        INFO("SeqB[%d]: aWants=%d, compMode=%d, bWins=%d", seqIndex, aWantsToFire, seq.competitionMode, bWins);
 
         if (bWins) {
             // B fires - advance value index
@@ -565,9 +546,6 @@ struct Core : Module {
             }
             trigPulseB[seqIndex].trigger(1e-3f);
             seqTriggeredBThisFrame[seqIndex] = true;
-            INFO("SeqB[%d]: FIRED, valueIdx=%d", seqIndex, seq.currentValueIndexB);
-        } else {
-            INFO("SeqB[%d]: lost competition to A", seqIndex);
         }
     }
 
@@ -850,6 +828,11 @@ struct Core : Module {
             dst.isValueSingleMode = src.isValueSingleMode();
             dst.isStepSingleMode = src.isStepSingleMode();
 
+            // Per-sequencer CV values
+            dst.cv1 = src.cv1;
+            dst.cv2 = src.cv2;
+            dst.cv3 = src.cv3;
+
             // Voltage settings
             dst.voltageRangeA = src.voltageRangeA;
             dst.voltageRangeB = src.voltageRangeB;
@@ -1001,7 +984,7 @@ struct Core : Module {
     }
 
     void processSequencerParameter(int paramIndex, int value) {
-        // paramIndex: 0=VAL-A, 1=VAL-B, 2=STEP-A, 3=STEP-B, 4=PROB-A, 5=PROB-B, 6=BIAS, 7=reserved
+        // paramIndex: 0=VAL-A, 1=VAL-B, 2=STEP-A, 3=STEP-B, 4=BIAS, 5=CV1, 6=CV2, 7=CV3
         Sequencer& seq = sequencers[currentLayout - 1];
 
         switch (paramIndex) {
@@ -1045,22 +1028,24 @@ struct Core : Module {
                 updateSequencerLEDs();
                 break;
 
-            case 4:  // Probability A (0-100%)
-                seq.probA = value / 127.f;
-                recordChange(CHANGE_PROB_A, currentLayout, value * 100 / 127);
-                break;
-
-            case 5:  // Probability B (0-100%)
-                seq.probB = value / 127.f;
-                recordChange(CHANGE_PROB_B, currentLayout, value * 100 / 127);
-                break;
-
-            case 6:  // Bias/Amount (0-100%)
+            case 4:  // Bias/Amount (0-100%)
                 seq.bias = value / 127.f;
                 recordChange(CHANGE_BIAS, currentLayout, value * 100 / 127);
                 break;
 
-            case 7:  // Reserved
+            case 5:  // CV 1 (0-127)
+                seq.cv1 = value;
+                recordChange(CHANGE_CV1, currentLayout, value);
+                break;
+
+            case 6:  // CV 2 (0-127)
+                seq.cv2 = value;
+                recordChange(CHANGE_CV2, currentLayout, value);
+                break;
+
+            case 7:  // CV 3 (0-127)
+                seq.cv3 = value;
+                recordChange(CHANGE_CV3, currentLayout, value);
                 break;
         }
     }
@@ -1538,10 +1523,11 @@ struct Core : Module {
             json_object_set_new(seqJ, "stepLengthA", json_integer(sequencers[s].stepLengthA));
             json_object_set_new(seqJ, "stepLengthB", json_integer(sequencers[s].stepLengthB));
 
-            // Save probability and bias
-            json_object_set_new(seqJ, "probA", json_real(sequencers[s].probA));
-            json_object_set_new(seqJ, "probB", json_real(sequencers[s].probB));
+            // Save bias and per-sequencer CV values
             json_object_set_new(seqJ, "bias", json_real(sequencers[s].bias));
+            json_object_set_new(seqJ, "cv1", json_integer(sequencers[s].cv1));
+            json_object_set_new(seqJ, "cv2", json_integer(sequencers[s].cv2));
+            json_object_set_new(seqJ, "cv3", json_integer(sequencers[s].cv3));
 
             // Save modes
             json_object_set_new(seqJ, "competitionMode", json_integer(sequencers[s].competitionMode));
@@ -1631,13 +1617,15 @@ struct Core : Module {
                     json_t* slB = json_object_get(seqJ, "stepLengthB");
                     if (slB) sequencers[s].stepLengthB = json_integer_value(slB);
 
-                    // Load probability and bias
-                    json_t* pA = json_object_get(seqJ, "probA");
-                    if (pA) sequencers[s].probA = json_real_value(pA);
-                    json_t* pB = json_object_get(seqJ, "probB");
-                    if (pB) sequencers[s].probB = json_real_value(pB);
+                    // Load bias and per-sequencer CV values
                     json_t* biasJ = json_object_get(seqJ, "bias");
                     if (biasJ) sequencers[s].bias = json_real_value(biasJ);
+                    json_t* cv1J = json_object_get(seqJ, "cv1");
+                    if (cv1J) sequencers[s].cv1 = json_integer_value(cv1J);
+                    json_t* cv2J = json_object_get(seqJ, "cv2");
+                    if (cv2J) sequencers[s].cv2 = json_integer_value(cv2J);
+                    json_t* cv3J = json_object_get(seqJ, "cv3");
+                    if (cv3J) sequencers[s].cv3 = json_integer_value(cv3J);
 
                     // Load modes
                     json_t* compMode = json_object_get(seqJ, "competitionMode");
@@ -1743,6 +1731,11 @@ struct CoreWidget : ModuleWidget {
         addChild(createLabel(mm2px(Vec(15, 78)), mm2px(Vec(10, 4)), "2    6", 6.f));
         addChild(createLabel(mm2px(Vec(15, 88)), mm2px(Vec(10, 4)), "3    7", 6.f));
         addChild(createLabel(mm2px(Vec(15, 98)), mm2px(Vec(10, 4)), "4    8", 6.f));
+
+        // Module name at bottom
+        addChild(createLabel(mm2px(Vec(10, 110)), mm2px(Vec(20, 8)), "COR", 14.f));
+        // Brand below line
+        addChild(createLabel(mm2px(Vec(10, 120)), mm2px(Vec(20, 8)), "LCXL", 14.f));
     }
 
     void appendContextMenu(Menu* menu) override {

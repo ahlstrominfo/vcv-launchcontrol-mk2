@@ -3,7 +3,7 @@
   "name": "LaunchControl XL",
   "version": "2.0.0",
   "license": "GPL-3.0-or-later",
-  "brand": "LaunchControl",
+  "brand": "ahlstrominfo",
   "author": "ahlstrominfo",
   "authorEmail": "",
   "authorUrl": "",
@@ -54,6 +54,12 @@
       "name": "Info Display",
       "description": "Shows the most recent parameter change",
       "tags": ["Expander", "Visual"]
+    },
+    {
+      "slug": "CVExpander",
+      "name": "CV Expander",
+      "description": "Outputs 3 per-sequencer CV values for all 8 sequencers",
+      "tags": ["Expander", "Controller"]
     }
   ]
 }
