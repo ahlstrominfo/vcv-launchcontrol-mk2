@@ -3,7 +3,7 @@
 ## Build & Deploy
 ```bash
 make                    # Build plugin
-cp plugin.dylib "# Copy to your VCV Rack plugins folder (see README.md for platform-specific paths)"
+# Copy to your VCV Rack plugins folder (see README.md for platform-specific paths)
 ```
 Restart VCV Rack after deploying to load new plugin.
 
