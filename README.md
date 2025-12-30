@@ -293,12 +293,60 @@ All expanders (except ClockExpander) can be placed in any order to the right of 
 - VCV Rack 2.x
 - Novation Launch Control XL MK2
 
-## Building
+## Building from Source
 
+### Prerequisites
+
+1. **VCV Rack SDK** - Download from [VCV Rack SDK](https://vcvrack.com/manual/PluginDevelopmentTutorial)
+2. **Build tools**:
+   - **macOS**: Xcode Command Line Tools (`xcode-select --install`)
+   - **Windows**: MSYS2 with MinGW-w64
+   - **Linux**: `build-essential`, `cmake`, `curl`, `git`
+
+### Build Steps
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/ahlstrominfo/vcv-launchcontrol.git
+   cd vcv-launchcontrol
+   ```
+
+2. Set the Rack SDK path (or place `Rack-SDK` folder in the plugin directory):
+   ```bash
+   export RACK_DIR=/path/to/Rack-SDK
+   ```
+
+3. Build:
+   ```bash
+   make
+   ```
+
+### Installation
+
+Copy the plugin files to your VCV Rack plugins folder. The folder must be named `LaunchControlXL`.
+
+**macOS:**
 ```bash
-make
-cp plugin.dylib "/path/to/Rack2/plugins/LaunchControlXL/"
+mkdir -p ~/Documents/Rack2/plugins/LaunchControlXL
+cp plugin.dylib res/*.svg ~/Documents/Rack2/plugins/LaunchControlXL/
+cp plugin.json ~/Documents/Rack2/plugins/LaunchControlXL/
 ```
+
+**Windows:**
+```bash
+mkdir -p ~/Documents/Rack2/plugins/LaunchControlXL
+cp plugin.dll res/*.svg ~/Documents/Rack2/plugins/LaunchControlXL/
+cp plugin.json ~/Documents/Rack2/plugins/LaunchControlXL/
+```
+
+**Linux:**
+```bash
+mkdir -p ~/.Rack2/plugins/LaunchControlXL
+cp plugin.so res/*.svg ~/.Rack2/plugins/LaunchControlXL/
+cp plugin.json ~/.Rack2/plugins/LaunchControlXL/
+```
+
+Restart VCV Rack to load the plugin.
 
 ## License
 
