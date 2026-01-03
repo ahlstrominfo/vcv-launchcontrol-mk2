@@ -1,6 +1,7 @@
 #include "plugin.hpp"
 #include "ExpanderMessage.hpp"
 #include <midi.hpp>
+#include <cstring>  // for memset, memcpy
 
 // Launch Control XL Factory Template 1 MIDI mappings (Channel 9)
 namespace LCXL {
@@ -179,6 +180,15 @@ struct Core : Module {
         // Routing state for single mode
         int alternateCounter = 0;       // Counter for alternate/2+2 modes
 
+        // Per-step glide times (0 = instant, 127 = slow ~3 seconds)
+        int glideTime[16] = {0};        // Glide time for transition FROM each value position
+        float currentSlewA = 0.f;       // Current slewed CV output for A
+        float currentSlewB = 0.f;       // Current slewed CV output for B
+        int prevValueIndexA = 0;        // Previous value index for detecting transitions
+        int prevValueIndexB = 0;        // Previous value index for B
+        float activeGlideA = 0.f;       // Currently active glide time for A (seconds)
+        float activeGlideB = 0.f;       // Currently active glide time for B (seconds)
+
         // Helper to check if values are in single mode (all 16 knobs for one seq)
         bool isValueSingleMode() const { return valueLengthA >= 9; }
         // Helper to check if steps are in single mode (all 16 buttons for one seq)
@@ -186,9 +196,13 @@ struct Core : Module {
     };
     Sequencer sequencers[8];
 
-    // Soft takeover state
+    // Soft takeover state for value knobs
     int lastPhysicalKnobPos[24] = {};  // Will be initialized to -1 in constructor
     bool knobPickedUp[24] = {};        // Will be initialized to true in constructor
+
+    // Soft takeover state for glide times (per sequencer, 16 values each)
+    int lastPhysicalGlidePos[8][16] = {{0}};  // Last physical position for glide
+    bool glidePickedUp[8][16] = {{false}};    // Whether glide value is picked up
 
     // Amber display timer for length parameters (0=valLenA, 1=valLenB, 2=stepLenA, 3=stepLenB)
     float lengthChangeTime[4] = {-1.f, -1.f, -1.f, -1.f};
@@ -202,6 +216,17 @@ struct Core : Module {
 
     // Last change tracking for InfoDisplay
     LastChangeInfo lastChange;
+
+    // CPU optimization: LED state tracking to avoid redundant SysEx
+    // Indices 0-23 = knobs, 24-39 = buttons (Track Focus 24-31, Track Control 32-39)
+    uint8_t lastLEDState[40] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};  // 0xFF = unknown/force update
+
+    // CPU optimization: dirty flag for expander message
+    bool expanderDirty = true;
 
     void recordChange(ChangeType type, int seq, int value, int step = 0) {
         lastChange.type = type;
@@ -237,6 +262,14 @@ struct Core : Module {
         for (int i = 0; i < 24; i++) {
             lastPhysicalKnobPos[i] = -1;  // Unknown position
             knobPickedUp[i] = true;        // Start as picked up
+        }
+
+        // Initialize glide pickup state
+        for (int s = 0; s < 8; s++) {
+            for (int i = 0; i < 16; i++) {
+                lastPhysicalGlidePos[s][i] = -1;
+                glidePickedUp[s][i] = true;
+            }
         }
 
         // Setup left expander message buffers (for ClockExpander)
@@ -388,20 +421,51 @@ struct Core : Module {
         // Output trigger and CV for the output sequencer
         // outputLayout: 0 = follow currentLayout, 1-8 = fixed sequencer
         int outSeq = (outputLayout > 0) ? outputLayout : currentLayout;
+
+        // CPU optimization: only compute slewed CV for sequencers that need it
+        // - Always compute for the output sequencer (outSeq)
+        // - Compute for all 8 only if there's a right expander that might use them
+        bool hasRightExpander = rightExpander.module != nullptr;
+        for (int s = 0; s < 8; s++) {
+            // Skip if not needed: no right expander AND not the output sequencer
+            if (!hasRightExpander && (s + 1) != outSeq) continue;
+
+            Sequencer& seq = sequencers[s];
+            int layout = s + 1;  // Layout index (1-8)
+
+            // Compute target CV A
+            int knobIdxA = seq.currentValueIndexA;
+            int glideValA = seq.glideTime[knobIdxA];
+            if (glideValA == 0) {
+                // Fast path: no glide, direct assignment
+                seq.currentSlewA = knobToVoltage(knobValues[layout][knobIdxA], seq.voltageRangeA, seq.bipolarA);
+            } else {
+                float targetA = knobToVoltage(knobValues[layout][knobIdxA], seq.voltageRangeA, seq.bipolarA);
+                float glideTimeA = (glideValA / 127.f) * 3.f;
+                seq.currentSlewA = applySlewExp(seq.currentSlewA, targetA, glideTimeA, args.sampleTime);
+            }
+
+            // Compute target CV B
+            int knobIdxB = seq.isValueSingleMode() ? seq.currentValueIndexA : (8 + seq.currentValueIndexB);
+            int glideValB = seq.glideTime[knobIdxB];
+            if (glideValB == 0) {
+                // Fast path: no glide, direct assignment
+                seq.currentSlewB = knobToVoltage(knobValues[layout][knobIdxB], seq.voltageRangeB, seq.bipolarB);
+            } else {
+                float targetB = knobToVoltage(knobValues[layout][knobIdxB], seq.voltageRangeB, seq.bipolarB);
+                float glideTimeB = (glideValB / 127.f) * 3.f;
+                seq.currentSlewB = applySlewExp(seq.currentSlewB, targetB, glideTimeB, args.sampleTime);
+            }
+        }
         if (outSeq > 0) {
             Sequencer& seq = sequencers[outSeq - 1];
 
-            // Output A
+            // Output triggers and slewed CV (slew already computed above for all sequencers)
             outputs[SEQ_TRIG_A_OUTPUT].setVoltage(trigOutA[outSeq - 1] ? 10.f : 0.f);
-            int knobIndexA = seq.isValueSingleMode() ? seq.currentValueIndexA : seq.currentValueIndexA;
-            float cvA = knobToVoltage(knobValues[outSeq][knobIndexA], seq.voltageRangeA, seq.bipolarA);
-            outputs[SEQ_CV_A_OUTPUT].setVoltage(cvA);
+            outputs[SEQ_CV_A_OUTPUT].setVoltage(seq.currentSlewA);
 
-            // Output B
             outputs[SEQ_TRIG_B_OUTPUT].setVoltage(trigOutB[outSeq - 1] ? 10.f : 0.f);
-            int knobIndexB = seq.isValueSingleMode() ? seq.currentValueIndexA : (8 + seq.currentValueIndexB);
-            float cvB = knobToVoltage(knobValues[outSeq][knobIndexB], seq.voltageRangeB, seq.bipolarB);
-            outputs[SEQ_CV_B_OUTPUT].setVoltage(cvB);
+            outputs[SEQ_CV_B_OUTPUT].setVoltage(seq.currentSlewB);
         } else {
             outputs[SEQ_TRIG_A_OUTPUT].setVoltage(0.f);
             outputs[SEQ_CV_A_OUTPUT].setVoltage(0.f);
@@ -417,8 +481,9 @@ struct Core : Module {
         lights[TAKEOVER_LIGHT].setBrightness(takenOver ? 1.f : 0.f);
 
         // Update and send expander message to right-side expanders
-        updateExpanderMessage();
+        // CPU optimization: only update if there's a right expander
         if (rightExpander.module) {
+            updateExpanderMessage();
             LCXLExpanderMessage* msg = reinterpret_cast<LCXLExpanderMessage*>(rightExpander.module->leftExpander.producerMessage);
             if (msg) {
                 *msg = expanderMessage;
@@ -788,31 +853,17 @@ struct Core : Module {
         expanderMessage.moduleId = id;
         expanderMessage.currentLayout = currentLayout;
 
-        // Copy fader values
-        for (int i = 0; i < 8; i++) {
-            expanderMessage.faderValues[i] = faderValues[i];
-        }
-
-        // Copy knob values for all layouts
-        for (int layout = 0; layout < 9; layout++) {
-            for (int i = 0; i < 24; i++) {
-                expanderMessage.knobValues[layout][i] = knobValues[layout][i];
-            }
-        }
-
-        // Copy button states
-        for (int i = 0; i < 16; i++) {
-            expanderMessage.buttonStates[i] = buttonStates[i];
-            expanderMessage.buttonMomentary[i] = buttonMomentary[i];
-        }
+        // CPU optimization: use memcpy for bulk array copies
+        std::memcpy(expanderMessage.faderValues, faderValues, sizeof(faderValues));
+        std::memcpy(expanderMessage.knobValues, knobValues, sizeof(knobValues));
+        std::memcpy(expanderMessage.buttonStates, buttonStates, sizeof(buttonStates));
+        std::memcpy(expanderMessage.buttonMomentary, buttonMomentary, sizeof(buttonMomentary));
 
         // Copy sequencer data
         for (int s = 0; s < 8; s++) {
             auto& dst = expanderMessage.sequencers[s];
             auto& src = sequencers[s];
-            for (int i = 0; i < 16; i++) {
-                dst.steps[i] = src.steps[i];
-            }
+            std::memcpy(dst.steps, src.steps, sizeof(src.steps));
 
             // Sequence A data
             dst.currentStepA = src.currentStepA;
@@ -842,6 +893,10 @@ struct Core : Module {
             dst.voltageRangeB = src.voltageRangeB;
             dst.bipolarA = src.bipolarA;
             dst.bipolarB = src.bipolarB;
+
+            // Slewed CV outputs
+            dst.slewedCVA = src.currentSlewA;
+            dst.slewedCVB = src.currentSlewB;
 
             // Legacy fields for compatibility
             dst.loopStart = 0;
@@ -950,6 +1005,12 @@ struct Core : Module {
         // In sequencer mode, bottom row knobs (16-23) are parameters - bypass soft takeover
         bool isParameterKnob = (currentLayout > 0 && knobIndex >= 16);
 
+        // If RecArm is held in sequencer mode and this is a value knob, control glide time
+        if (recArmHeld && currentLayout > 0 && knobIndex < 16) {
+            processGlideKnobChange(knobIndex, value);
+            return;
+        }
+
         if (isParameterKnob) {
             // Parameter knobs work immediately without soft takeover
             knobValues[currentLayout][knobIndex] = value;
@@ -985,6 +1046,30 @@ struct Core : Module {
         } else {
             updateKnobLED(knobIndex);
         }
+    }
+
+    void processGlideKnobChange(int knobIndex, int value) {
+        Sequencer& seq = sequencers[currentLayout - 1];
+        int seqIdx = currentLayout - 1;
+
+        // Soft takeover logic for glide time
+        int storedGlide = seq.glideTime[knobIndex];
+
+        if (!glidePickedUp[seqIdx][knobIndex]) {
+            // Check if we've reached the pickup zone (±2)
+            if (std::abs(value - storedGlide) <= 2) {
+                glidePickedUp[seqIdx][knobIndex] = true;
+            }
+        }
+
+        if (glidePickedUp[seqIdx][knobIndex]) {
+            seq.glideTime[knobIndex] = value;
+        }
+
+        lastPhysicalGlidePos[seqIdx][knobIndex] = value;
+
+        // Update glide LEDs
+        showGlideLEDs();
     }
 
     void processSequencerParameter(int paramIndex, int value) {
@@ -1192,9 +1277,48 @@ struct Core : Module {
         }
     }
 
+    void showGlideLEDs() {
+        if (currentLayout <= 0) return;
+        Sequencer& seq = sequencers[currentLayout - 1];
+        int seqIdx = currentLayout - 1;
+
+        // Show glide status for value knobs (0-15)
+        for (int i = 0; i < 16; i++) {
+            uint8_t color;
+            if (seq.glideTime[i] == 0) {
+                // No glide - LED off
+                color = LCXL::LED_OFF;
+            } else {
+                // Has glide - show soft takeover colors
+                int storedGlide = seq.glideTime[i];
+                int physicalPos = lastPhysicalGlidePos[seqIdx][i];
+
+                if (physicalPos < 0) {
+                    // Unknown physical position - assume picked up
+                    color = LCXL::LED_GREEN_FULL;
+                } else if (glidePickedUp[seqIdx][i] || std::abs(physicalPos - storedGlide) <= 2) {
+                    color = LCXL::LED_GREEN_FULL;  // Picked up
+                } else if (physicalPos < storedGlide) {
+                    color = LCXL::LED_YELLOW_FULL;  // Turn right
+                } else {
+                    color = LCXL::LED_RED_FULL;  // Turn left
+                }
+            }
+            sendKnobLEDSysEx(i, color);
+        }
+
+        // Row 3 knobs (16-23) stay as normal parameter LEDs
+        for (int i = 16; i < 24; i++) {
+            updateKnobLED(i);
+        }
+    }
+
     void showModeSelectionLEDs() {
         if (currentLayout <= 0) return;
         Sequencer& seq = sequencers[currentLayout - 1];
+
+        // Also show glide LEDs on value knobs
+        showGlideLEDs();
 
         // Track Focus row (top, buttons 0-7): Mode selection (all 8 modes)
         int currentMode = seq.isStepSingleMode() ? seq.routingMode : seq.competitionMode;
@@ -1322,6 +1446,22 @@ struct Core : Module {
         } else {
             return normalized * maxVoltage;  // 0 to max
         }
+    }
+
+    // Apply exponential slew (RC filter style)
+    // current: current output value
+    // target: target value to slew toward
+    // glideTime: time constant in seconds (0 = instant)
+    // sampleTime: time for this sample
+    float applySlewExp(float current, float target, float glideTime, float sampleTime) {
+        if (glideTime <= 0.f || glideTime < sampleTime) {
+            return target;  // No glide or glide time too short
+        }
+        // Exponential slew: move a percentage toward target each sample
+        // lambda = 1 - e^(-sampleTime / glideTime) for accurate RC filter
+        // Simplified: lambda = sampleTime / glideTime (good approximation for small values)
+        float lambda = std::min(1.f, sampleTime / glideTime * 4.f);  // *4 to reach target faster
+        return current + (target - current) * lambda;
     }
 
     void processNoteOff(int note) {
@@ -1500,6 +1640,10 @@ struct Core : Module {
     }
 
     void sendKnobLEDSysEx(int knobIndex, uint8_t color) {
+        // CPU optimization: skip if LED state unchanged
+        if (lastLEDState[knobIndex] == color) return;
+        lastLEDState[knobIndex] = color;
+
         // SysEx: F0 00 20 29 02 11 78 [template] [index] [color] F7
         // Template 8 = Factory Template 1
         midi::Message msg;
@@ -1526,6 +1670,10 @@ struct Core : Module {
             ledIndex = 32 + (buttonIndex - 8);  // Bottom row (Track Control) = indices 32-39
         }
 
+        // CPU optimization: skip if LED state unchanged
+        if (lastLEDState[ledIndex] == color) return;
+        lastLEDState[ledIndex] = color;
+
         midi::Message msg;
         msg.bytes = {
             0xF0,
@@ -1545,6 +1693,9 @@ struct Core : Module {
         midi::Message msg;
         msg.bytes = {0xB8, 0x00, 0x00};  // CC channel 9, CC 0, value 0
         midiOutput.sendMessage(msg);
+
+        // Invalidate LED state cache so next update sends all LEDs
+        std::memset(lastLEDState, 0xFF, sizeof(lastLEDState));
     }
 
     json_t* dataToJson() override {
@@ -1623,6 +1774,13 @@ struct Core : Module {
             json_object_set_new(seqJ, "voltageRangeB", json_integer(sequencers[s].voltageRangeB));
             json_object_set_new(seqJ, "bipolarA", json_boolean(sequencers[s].bipolarA));
             json_object_set_new(seqJ, "bipolarB", json_boolean(sequencers[s].bipolarB));
+
+            // Save glide times
+            json_t* glideJ = json_array();
+            for (int i = 0; i < 16; i++) {
+                json_array_append_new(glideJ, json_integer(sequencers[s].glideTime[i]));
+            }
+            json_object_set_new(seqJ, "glideTime", glideJ);
 
             json_array_append_new(seqsJ, seqJ);
         }
@@ -1736,6 +1894,15 @@ struct Core : Module {
                     if (bpA) sequencers[s].bipolarA = json_boolean_value(bpA);
                     json_t* bpB = json_object_get(seqJ, "bipolarB");
                     if (bpB) sequencers[s].bipolarB = json_boolean_value(bpB);
+
+                    // Load glide times
+                    json_t* glideJ = json_object_get(seqJ, "glideTime");
+                    if (glideJ) {
+                        for (int i = 0; i < 16; i++) {
+                            json_t* valJ = json_array_get(glideJ, i);
+                            if (valJ) sequencers[s].glideTime[i] = json_integer_value(valJ);
+                        }
+                    }
                 }
             }
         }

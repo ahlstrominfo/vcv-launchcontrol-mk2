@@ -91,6 +91,10 @@ struct LCXLExpanderMessage {
         bool bipolarA = false;
         bool bipolarB = false;
 
+        // Slewed CV outputs (already processed with glide)
+        float slewedCVA = 0.f;
+        float slewedCVB = 0.f;
+
         // Legacy fields for compatibility
         int loopStart = 0;
         int loopEnd = 15;

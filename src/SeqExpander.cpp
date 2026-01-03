@@ -97,15 +97,9 @@ struct SeqExpander : Module {
                     outputs[TRIG_A_OUTPUT + s].setVoltage(triggerPulsesA[s].process(args.sampleTime) ? 10.f : 0.f);
                     outputs[TRIG_B_OUTPUT + s].setVoltage(triggerPulsesB[s].process(args.sampleTime) ? 10.f : 0.f);
 
-                    // Output CV A from value knob with voltage range/bipolar settings
-                    int knobIndexA = seq.currentValueIndexA;
-                    float cvA = knobToVoltage(msg->knobValues[layout][knobIndexA], seq.voltageRangeA, seq.bipolarA);
-                    outputs[CV_A_OUTPUT + s].setVoltage(cvA);
-
-                    // Output CV B from value knob with voltage range/bipolar settings
-                    int knobIndexB = seq.isValueSingleMode ? seq.currentValueIndexA : (8 + seq.currentValueIndexB);
-                    float cvB = knobToVoltage(msg->knobValues[layout][knobIndexB], seq.voltageRangeB, seq.bipolarB);
-                    outputs[CV_B_OUTPUT + s].setVoltage(cvB);
+                    // Output slewed CV (with glide already applied by Core)
+                    outputs[CV_A_OUTPUT + s].setVoltage(seq.slewedCVA);
+                    outputs[CV_B_OUTPUT + s].setVoltage(seq.slewedCVB);
                 }
 
                 // Store for forwarding
